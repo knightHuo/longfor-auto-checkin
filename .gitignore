@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 运行数据（含 token，务必不要提交）
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# 抓包产物
+*.har
+captured/
+
+# 系统与编辑器
+.DS_Store
+._*
+Thumbs.db
+.idea/
+.vscode/
+*.log
+.env
+.env.*
+!.env.example
+*.curl
+*.curl.txt
+secrets/
+work/
+backups/
+node_modules/
+.pytest_cache/
+*.tgz
+*.zip
+.coverage
+htmlcov/

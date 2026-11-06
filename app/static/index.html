@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="app-root" content="__APP_ROOT__">
+<title>龙湖自动签到 · Longfor Auto Check-in</title>
+<style>
+  :root {
+    --bg: #0b0d11;
+    --card: #14171d;
+    --card-2: #191d25;
+    --line: #242a34;
+    --text: #e9edf4;
+    --dim: #8b95a6;
+    --gold: #f0b429;
+    --blue: #4d8bfe;
+    --green: #3fb950;
+    --red: #f85149;
+    --amber: #d9a536;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: radial-gradient(900px 500px at 15% -10%, #1a2233 0%, transparent 60%), var(--bg);
+    color: var(--text);
+    font: 14px/1.6 -apple-system, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+    min-height: 100vh;
+    padding-bottom: 60px;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 28px 20px; }
+
+  header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 26px; flex-wrap: wrap; }
+  .brand { display: flex; align-items: center; gap: 10px; font-size: 19px; font-weight: 600; letter-spacing: .3px; }
+  .brand .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 12px var(--gold); }
+  .brand small { display:block; color:var(--dim); font-size:11px; font-weight:400; letter-spacing:.5px; }
+  .setup-note { border:1px solid #514120; background:#1c1912; padding:12px 16px; border-radius:12px; margin-bottom:18px; color:#e9c984; }
+  .setup-note a, .project-note a { color:var(--blue); }
+  .project-note { color:var(--dim); font-size:12px; margin-top:24px; }
+  .actions { display: flex; gap: 10px; }
+
+  button {
+    font: inherit; cursor: pointer; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--card-2); color: var(--text); padding: 8px 15px; transition: .16s;
+  }
+  button:hover { border-color: #39414f; background: #1e2430; }
+  button.primary { background: linear-gradient(180deg, #f3bd3f, #dea01d); color: #2a1d00; border-color: #e5ad2c; font-weight: 600; }
+  button.primary:hover { filter: brightness(1.07); }
+  button.ghost { background: transparent; }
+  button.danger { color: var(--red); border-color: #3a2226; background: #1d1416; }
+  button.small { padding: 5px 11px; font-size: 13px; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button:focus-visible, a:focus-visible { outline:2px solid var(--blue); outline-offset:3px; }
+
+  .overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 26px; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 15px 17px; }
+  .stat .label { color: var(--dim); font-size: 12.5px; }
+  .stat .value { font-size: 23px; font-weight: 600; margin-top: 3px; letter-spacing: .5px; }
+  .stat .value small { font-size: 12px; color: var(--dim); font-weight: 400; margin-left: 3px; }
+
+  h2 { font-size: 15px; font-weight: 600; color: #b9c2d0; margin: 0 0 13px; letter-spacing: .4px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 14px; margin-bottom: 32px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; position: relative; overflow: hidden; }
+  .card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 2px; background: linear-gradient(90deg, transparent, var(--gold), transparent); opacity: .35; }
+  .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 15px; }
+  .card-name { font-size: 16px; font-weight: 600; }
+  .card-sub { color: var(--dim); font-size: 12px; margin-top: 2px; font-family: ui-monospace, Menlo, monospace; }
+
+  .badge { font-size: 11.5px; padding: 3px 9px; border-radius: 20px; white-space: nowrap; border: 1px solid transparent; }
+  .b-ok { color: var(--green); background: #12251a; border-color: #1d3a28; }
+  .b-already { color: #7ba7e8; background: #121c2b; border-color: #1d2c42; }
+  .b-fail { color: var(--red); background: #261316; border-color: #3d1f23; }
+  .b-pending { color: var(--amber); background: #241d10; border-color: #3a2f18; }
+  .entry-results { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 15px; }
+  .entry-result { border: 1px solid var(--line); border-radius: 9px; padding: 10px; min-width: 0; }
+  .entry-result .name { color: var(--dim); font-size: 12px; margin-bottom: 7px; }
+  .entry-result .note { color: var(--dim); font-size: 11px; margin-top: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 15px; }
+  .metric .k { color: var(--dim); font-size: 11.5px; }
+  .metric .v { font-size: 17px; font-weight: 600; margin-top: 1px; }
+  .metric .v.gold { color: var(--gold); }
+
+  .bar-label { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--dim); margin-bottom: 5px; }
+  .bar { height: 5px; background: #1e232c; border-radius: 4px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, #2fa04a, #4bbd67); transition: width .4s; }
+  .bar.warn > i { background: linear-gradient(90deg, #c98a1c, #e5b23c); }
+  .bar.danger > i { background: linear-gradient(90deg, #c0332c, #ef5b53); }
+
+  .card-foot { display: flex; gap: 8px; margin-top: 15px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .card-foot .msg { flex: 1; font-size: 12px; color: var(--dim); align-self: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .empty { border: 1px dashed var(--line); border-radius: var(--radius); padding: 44px 20px; text-align: center; color: var(--dim); }
+  .empty b { display: block; color: var(--text); margin-bottom: 6px; font-size: 15px; }
+
+  .logs { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  .log-row { display: grid; grid-template-columns: 118px 96px 66px 1fr; gap: 12px; padding: 10px 16px; font-size: 12.5px; border-bottom: 1px solid #1b2029; align-items: center; }
+  .log-row:last-child { border-bottom: 0; }
+  .log-row .t { color: var(--dim); font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }
+  .log-row .n { color: #c3cbd8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .log-row .a { color: var(--dim); }
+  .log-row .m { color: #9aa5b6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .s-ok { color: var(--green); }
+  .s-fail { color: var(--red); }
+  .s-already { color: #7ba7e8; }
+  .s-todo { color: var(--amber); }
+
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.66); backdrop-filter: blur(4px); display: none; align-items: center; justify-content: center; padding: 20px; z-index: 50; }
+  .modal.show { display: flex; }
+  .dialog { background: #12151b; border: 1px solid var(--line); border-radius: 16px; width: 100%; max-width: 560px; max-height: 88vh; overflow-y: auto; padding: 22px; }
+  .dialog h3 { margin: 0 0 4px; font-size: 17px; }
+  .dialog-foot { position:sticky; bottom:-22px; background:#12151b; padding-bottom:12px; }
+  .dialog .hint { color: var(--dim); font-size: 12.5px; margin-bottom: 16px; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 12.5px; color: var(--dim); margin-bottom: 6px; }
+  input[type=text], input[type=password], textarea, input[type=time], input[type=number], select {
+    width: 100%; background: #0d1015; border: 1px solid var(--line); border-radius: 10px;
+    color: var(--text); padding: 10px 12px; font: inherit; outline: none; transition: .15s;
+  }
+  select { appearance: none; -webkit-appearance: none; cursor: pointer;
+    background-image: linear-gradient(45deg, transparent 50%, #6b7688 50%), linear-gradient(135deg, #6b7688 50%, transparent 50%);
+    background-position: calc(100% - 18px) calc(50% + 1px), calc(100% - 13px) calc(50% + 1px);
+    background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
+  input[type=number]::-webkit-inner-spin-button,
+  input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  input:focus, textarea:focus { border-color: #3a4a66; box-shadow: 0 0 0 3px rgba(77,139,254,.12); }
+  textarea { resize: vertical; min-height: 132px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; line-height: 1.5; }
+
+  .tabs { display: flex; gap: 6px; background: #0d1015; padding: 4px; border-radius: 11px; border: 1px solid var(--line); margin-bottom: 16px; }
+  .tabs button { flex: 1; border: 0; background: transparent; padding: 7px; font-size: 13px; color: var(--dim); border-radius: 8px; }
+  .tabs button.active { background: #1e2530; color: var(--text); }
+
+  .dialog-foot { display: flex; justify-content: flex-end; gap: 9px; margin-top: 18px; }
+  .tips { background: #101720; border: 1px solid #1d2a3a; border-radius: 10px; padding: 11px 13px; font-size: 12px; color: #8fa4bd; line-height: 1.65; margin-bottom: 14px; }
+  .tips code { background: #1a2330; padding: 1px 5px; border-radius: 4px; font-size: 11.5px; color: #a8c0dd; }
+
+  #toast { position: fixed; left: 50%; bottom: 34px; transform: translateX(-50%) translateY(20px); background: #1c222c; border: 1px solid var(--line); color: var(--text); padding: 11px 20px; border-radius: 11px; opacity: 0; pointer-events: none; transition: .25s; z-index: 100; font-size: 13px; max-width: 88vw; }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  #toast.err { border-color: #4a2226; color: #ff9d96; }
+
+  .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid #ffffff33; border-top-color: #fff; border-radius: 50%; animation: rot .7s linear infinite; vertical-align: -1px; margin-right: 6px; }
+  @keyframes rot { to { transform: rotate(360deg); } }
+
+  @media (max-width: 640px) {
+    .wrap { padding: 18px 14px; }
+    .log-row { grid-template-columns: 1fr auto; gap: 4px 10px; }
+    .log-row .t { grid-column: 1; }
+    .log-row .m { grid-column: 1 / -1; }
+    .log-row .a, .log-row .n { display: none; }
+  }
+</style>
+<style>@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand"><span class="dot"></span><div>龙湖自动签到<small>Longfor Auto Check-in · 预览版</small></div></div>
+    <div class="actions">
+      <button id="btnSettings" class="ghost">设置</button>
+      <button id="btnAdd" class="primary">添加账号</button>
+    </div>
+  </header>
+
+  <div class="setup-note" id="setupNote" hidden></div>
+  <section class="overview" id="overview" aria-label="运行概览"></section>
+
+  <h2>账号</h2>
+  <div id="accounts" class="grid"></div>
+
+  <h2>最近日志</h2>
+  <div class="logs" id="logs"></div>
+  <p class="project-note">开源、自托管 · <a href="https://github.com/knightHuo/longfor-auto-checkin" target="_blank" rel="noopener noreferrer">项目与使用说明</a> · 非龙湖官方产品</p>
+</div>
+
+<!-- 添加账号 -->
+<div class="modal" id="modalAdd">
+  <div class="dialog" role="dialog" aria-modal="true" aria-label="添加账号">
+    <h3>添加账号</h3>
+    <div class="hint">导入自己的登录凭据后可自动续期；失效或需要验证时仍需人工处理。</div>
+
+    <div class="tabs">
+      <button data-mode="curl" class="active">粘贴 cURL</button>
+      <button data-mode="har">上传 HAR</button>
+      <button data-mode="token">直接填 token</button>
+    </div>
+
+    <div id="tipCurl" class="tips">
+      在本人正常登录的浏览器开发者工具中，选中龙湖会员查询请求 → <code>Copy as cURL</code>。请勿分享包含登录凭据的内容。
+    </div>
+    <div id="tipHar" class="tips" style="display:none">
+      仅导出 <code>gw2c-hw-open.longfor.com</code> 的会员请求（最多5 MiB），会选择其中匹配的登录凭据。
+    </div>
+    <div id="tipToken" class="tips" style="display:none">
+      直接填 32 位 token（抓包里 <code>X-LF-UserToken</code> 的值）。不确定就用上面两种方式。
+    </div>
+
+    <div class="field">
+      <label>添加或更新登录</label>
+      <select id="accTarget"><option value="">添加新账号</option></select>
+      <div class="hint">登录失效时选择原账号更新，保留历史及未重新提供的设备信息。</div>
+    </div>
+    <div class="field">
+      <label>备注名（可留空）</label>
+      <input type="text" id="accName" placeholder="例如：我的账号">
+    </div>
+
+    <div class="field" id="fieldText">
+      <label>内容</label>
+      <textarea id="accPayload" placeholder="curl 'https://gw2c-hw-open.longfor.com/...' -H 'X-LF-UserToken: ...'"></textarea>
+    </div>
+
+    <div class="field" id="fieldFile" style="display:none">
+      <label>HAR 文件</label>
+      <input type="file" id="accFile" accept=".har,.json">
+    </div>
+
+    <div class="dialog-foot">
+      <button id="btnCancelAdd" class="ghost">取消</button>
+      <button id="btnSubmitAdd" class="primary">校验并添加</button>
+    </div>
+  </div>
+</div>
+
+<!-- 设置 -->
+<div class="modal" id="modalSettings">
+  <div class="dialog" role="dialog" aria-modal="true" aria-label="设置">
+    <h3>设置</h3>
+    <div class="hint">每天在下面的窗口里随机挑一个时刻，自动跑一轮：续期 + 签到 + 刷新状态。</div>
+    <div class="field">
+      <label>签到窗口起点</label>
+      <input type="time" id="setTime">
+    </div>
+    <div class="field">
+      <label>随机浮动（分钟，0 = 固定时刻）</label>
+      <input type="number" id="setJitter" min="0" max="1439" step="5" placeholder="60">
+    </div>
+    <div class="tips" id="setWindowTip">每天在设定窗口内选择执行时刻。默认 08:00–09:00；随机时间不能保证通过服务端验证。</div>
+    <div class="field">
+      <label>通知方式</label>
+      <select id="setNotificationProvider">
+        <option value="webhook">Webhook（Bark / 企业微信 / 钉钉）</option>
+        <option value="pushplus">PushPlus 微信通知</option>
+      </select>
+    </div>
+    <div id="setWebhookFields">
+      <div class="field">
+        <label>推送地址（可留空）</label>
+        <input type="password" id="setWebhook" autocomplete="new-password" placeholder="填写新地址；留空保留已保存值">
+      </div>
+      <div class="tips">Bark 填 <code>https://api.day.app/DeviceKey</code>（自建服务填你的域名/key）；企业微信、钉钉填群机器人 webhook 地址。类型自动识别。</div>
+      <div class="tips" id="setWebhookState"></div>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:10px"><input type="checkbox" id="setClearWebhook" style="width:auto">清除已保存的推送地址</label>
+    </div>
+    <div id="setPushplusFields" style="display:none">
+      <div class="field">
+        <label>PushPlus 发送消息 token</label>
+        <input type="password" id="setPushplusToken" maxlength="128" autocomplete="new-password" placeholder="填写发送消息 token；留空保留已保存值">
+      </div>
+      <div class="tips" id="setPushplusState"></div>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:10px"><input type="checkbox" id="setClearPushplus" style="width:auto">清除已保存的 PushPlus token</label>
+    </div>
+    <div class="tips">每轮执行后发送小程序与 App 的结果。先保存设置，再发送测试；“已受理”表示推送服务接受了请求，实际投递请在微信中确认。</div>
+    <button type="button" class="small" id="btnTestNotification">测试已保存的通知设置</button>
+    <div class="field">
+      <label>App 签到入口</label>
+      <select id="setAppMode">
+        <option value="auto">两个入口都自动签（推荐）</option>
+        <option value="manual">只查状态，未签就提醒</option>
+        <option value="off">完全不处理</option>
+      </select>
+    </div>
+    <div class="tips">设备标识用于识别当前设备和环境，来源须与实际采集环境一致。<br>每个账号保留独立环境的标识；没配标识时会跳过提交。保存标识不代表已通过服务端验证，要求人机验证时按提示处理。</div>
+    <div class="dialog-foot">
+      <button id="btnCancelSet" class="ghost">取消</button>
+      <button id="btnSaveSet" class="primary">保存</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const API_BASE = document.querySelector('meta[name="app-root"]').content.replace(/\/$/, "");
+let accounts = [];
+let bindMode = "curl";
+let pushplusConfigured = false;
+let businessToday = "";
+let appCheckinMode = "auto";
+let modalOpener = null;
+
+function openModal(id) {
+  modalOpener = document.activeElement;
+  $(id).classList.add("show");
+  $(id).querySelector("input, textarea, select, button")?.focus();
+}
+function closeModal(modal) {
+  modal.classList.remove("show");
+  modal.querySelectorAll('input[type="password"]').forEach(input => { input.value = ""; });
+  modalOpener?.focus();
+}
+
+function toast(msg, isErr) {
+  const el = $("toast");
+  el.textContent = msg;
+  el.className = "show" + (isErr ? " err" : "");
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.className = ""; }, 3200);
+}
+
+async function api(path, opts) {
+  let res;
+  try {
+    res = await fetch(API_BASE + path, { ...opts, credentials: "same-origin" });
+  } catch (e) {
+    throw new Error("无法连接服务");
+  }
+  let data = null;
+  try { data = await res.json(); } catch (e) { /* ignore */ }
+  if (!res.ok) throw new Error((data && (data.detail || data.message)) || `请求失败 ${res.status}`);
+  return data;
+}
+
+function runResultSummary(result) {
+  if (result.checkin_status === "busy") {
+    return { message: result.checkin_message || "账号已有任务进行中，请等待本轮结果", isErr: false };
+  }
+  const extra = Array.isArray(result.extra_signs) ? result.extra_signs : [];
+  const entries = [{ name: "小程序", status: result.checkin_status, message: result.checkin_message || result.error }, ...extra];
+  if (!extra.some((item) => item.key === "app")) {
+    entries.push({ name: "App", status: "todo", message: "未返回执行结果，请查看日志" });
+  }
+  const labels = { ok: "已签到", already: "今日已签", todo: "待确认", risk: "需要验证", fail: "失败", conflict: "指纹冲突", skipped: "已跳过", retry: "等待重试", busy: "执行中" };
+  const needsAttention = (entry) => ["todo", "risk", "fail", "conflict", "retry"].includes(entry.status) || !Object.hasOwn(labels, entry.status);
+  return {
+    message: entries.map((entry) => `${entry.name || "App"}：${labels[entry.status] || "状态未知"}${needsAttention(entry) && entry.message ? `（${entry.message}）` : ""}`).join("；"),
+    isErr: entries.some(needsAttention),
+  };
+}
+
+function statusBadge(acc) {
+  if (!acc.enabled) return ['b-pending', '已停用'];
+  const labels = {
+    ok: ['b-ok', '今日完成'], already: ['b-already', '今日完成'],
+    partial: ['b-pending', '部分完成'], conflict: ['b-fail', '待处理'],
+    risk: ['b-fail', '需要验证'], fail: ['b-fail', '待处理'],
+    retry: ['b-pending', '等待重试'], busy: ['b-pending', '执行中'],
+    todo: ['b-pending', '待确认'],
+  };
+  return labels[acc.today_status] || ['b-pending', '待执行'];
+}
+
+function entryResult(acc, key) {
+  const isApp = key === "app";
+  const status = acc[isApp ? "app_today_status" : "mini_today_status"] || "pending";
+  const labels = { ok: "已签到", already: "今日已签", todo: "待确认", risk: "需要验证", fail: "失败", conflict: "指纹冲突", skipped: "已跳过", retry: "等待重试", busy: "执行中", pending: "待执行" };
+  const cls = ["ok", "already"].includes(status) ? "b-ok" : ["fail", "risk", "conflict"].includes(status) ? "b-fail" : "b-pending";
+  const message = status === "pending" ? "今日尚无执行结果" : status === "skipped" ? "已关闭 App 入口" : acc[isApp ? "app_last_message" : "last_message"] || "";
+  return `<div class="entry-result"><div class="name">${isApp ? "App" : "小程序"}</div><span class="badge ${cls}">${labels[status] || "状态未知"}</span><div class="note" title="${escapeHtml(message)}">${escapeHtml(message)}</div></div>`;
+}
+
+function renderOverview(o) {
+  const s = o.stats || {};
+  $("setupNote").hidden = o.schedule_enabled !== false;
+  $("setupNote").innerHTML = '自动调度已暂停。先导入账号、补齐真实设备标识并核对状态，再按 <a href="https://github.com/knightHuo/longfor-auto-checkin#快速开始" target="_blank" rel="noopener noreferrer">安装说明</a>开启。';
+  $("overview").innerHTML = `
+    <div class="stat"><div class="label">账号总数</div><div class="value">${o.total}<small>个</small></div></div>
+    <div class="stat"><div class="label">${appCheckinMode === "off" ? "今日签到完成" : "今日双端完成"}</div><div class="value" style="color:var(--green)">${(s.ok || 0) + (s.already || 0)}<small>个</small></div></div>
+    <div class="stat"><div class="label">部分完成</div><div class="value" style="color:var(--amber)">${s.partial || 0}<small>个</small></div></div>
+    <div class="stat"><div class="label">待执行 / 待处理</div><div class="value" style="color:${((s.fail||0) + (s.conflict||0) + (s.risk||0)) > 0 ? 'var(--red)' : 'var(--amber)'}">${(s.pending || 0) + (s.fail || 0) + (s.conflict || 0) + (s.risk || 0) + (s.retry || 0) + (s.busy || 0)}<small>个</small></div></div>
+    <div class="stat"><div class="label">预计登录有效期</div><div class="value">${o.min_days === null ? "—" : o.min_days}<small>天</small></div></div>
+    <div class="stat"><div class="label">下次执行</div><div class="value" style="font-size:15px;padding-top:6px">${o.schedule_enabled === false ? "自动调度已暂停" : (o.next_run || "—")}</div></div>
+  `;
+}
+
+function renderAccounts() {
+  if (!accounts.length) {
+    $("accounts").innerHTML = `<div class="empty" style="grid-column:1/-1">
+      <b>从自己的账号开始</b>添加登录凭据 → 补齐真实设备标识 → 核对两个入口的状态。需要验证时，在官方页面完成。
+    </div>`;
+    return;
+  }
+  $("accounts").innerHTML = accounts.map((a) => {
+    const [cls, label] = statusBadge(a);
+    const days = a.days_left === null || a.days_left === undefined ? null : a.days_left;
+    const pct = days === null ? 0 : Math.max(2, Math.min(100, (days / 30) * 100));
+    const barCls = days === null ? "" : days <= 3 ? "danger" : days <= 7 ? "warn" : "";
+    const dayText = days === null ? "未知" : `剩 ${days} 天`;
+    const sharedWith = (a.dx_shared_with || []).join("、");
+    const dxLabel = !a.has_dx ? "待补" : a.dx_conflict ? "与他人共用" : a.dx_shared ? "已配置（被共用）" : "已配置";
+    const dxColor = !a.has_dx ? "var(--amber)" : a.dx_conflict ? "var(--red)" : "var(--green)";
+    const dxTitle = sharedWith ? `与「${sharedWith}」使用同一指纹，会触发风控` : "";
+    return `
+    <div class="card" data-id="${a.id}">
+      <div class="card-head">
+        <div>
+          <div class="card-name">${escapeHtml(a.name)}</div>
+          <div class="card-sub">${a.token_mask || ""} · <span style="color:${dxColor}" title="${escapeHtml(dxTitle)}">指纹${dxLabel}${a.has_dx ? ` · ${escapeHtml(a.dx_source_label || "来源待确认")}` : ""}</span></div>
+          ${a.dx_conflict ? `<div style="margin-top:6px;font-size:12px;color:var(--red)">已暂停签到：与「${escapeHtml(sharedWith)}」共用指纹，请从本人独立设备环境重新采集</div>` : ""}
+        </div>
+        <span class="badge ${cls}">${label}</span>
+      </div>
+      <div class="metrics">
+        <div class="metric"><div class="k">成长值</div><div class="v">${a.growth_value ?? 0}</div></div>
+        <div class="metric"><div class="k">等级</div><div class="v">${escapeHtml(a.level_name || "—")}</div></div>
+        <div class="metric"><div class="k">珑珠</div><div class="v gold">${a.balance ?? 0}</div></div>
+      </div>
+      <div class="entry-results">${entryResult(a, "mini")}${entryResult(a, "app")}</div>
+      <div class="bar-label"><span>登录有效期（估算）</span><span>${dayText}</span></div>
+      <div class="bar ${barCls}"><i style="width:${pct}%"></i></div>
+      <div class="card-foot">
+        <button class="small" data-check="${a.id}" title="只查询官方状态，不续期或提交签到">核对状态</button>
+        <button class="small" data-dx="${a.id}">${a.has_dx ? "设备" : "补设备"}</button>
+        <button class="small" data-run="${a.id}">签到</button>
+        <button class="small danger" data-del="${a.id}">删除</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function renderLogs(logs) {
+  if (!logs || !logs.length) {
+    $("logs").innerHTML = `<div class="log-row"><div class="m">暂无记录</div></div>`;
+    return;
+  }
+  $("logs").innerHTML = logs.map((l) => {
+    const scls = l.status === "ok" ? "s-ok"
+      : (l.status === "fail" || l.status === "risk") ? "s-fail"
+      : l.status === "already" ? "s-already" : ["todo", "retry", "busy"].includes(l.status) ? "s-todo" : "";
+    const names = { refresh: "续期", checkin: "签到", checkin_app: "APP签到", query: "查询", bind: "绑定", run: "执行", dx: "指纹" };
+    return `<div class="log-row">
+      <div class="t">${(l.ts || "").replace("T", " ").slice(5, 16)}</div>
+      <div class="n">${escapeHtml(l.account_name || "")}</div>
+      <div class="a">${names[l.action] || l.action || ""}</div>
+      <div class="m"><span class="${scls}">${escapeHtml(l.message || "")}</span></div>
+    </div>`;
+  }).join("");
+}
+
+function escapeHtml(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+}
+
+async function loadAll() {
+  try {
+    const [overview, accs, logs] = await Promise.all([
+      api("/api/overview"), api("/api/accounts"), api("/api/logs?limit=40"),
+    ]);
+    businessToday = overview.today || "";
+    appCheckinMode = overview.app_checkin_mode || "auto";
+    renderOverview(overview);
+    accounts = accs;
+    renderAccounts();
+    renderLogs(logs);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// ---- 交互 ----
+$("btnAdd").onclick = () => {
+  $("accTarget").innerHTML = '<option value="">添加新账号</option>' + accounts.map(account => `<option value="${account.id}">更新登录：${escapeHtml(account.name)}</option>`).join("");
+  $("accName").value = "";
+  $("accPayload").value = "";
+  $("accFile").value = "";
+  openModal("modalAdd");
+};
+$("btnCancelAdd").onclick = () => closeModal($("modalAdd"));
+
+document.querySelectorAll(".tabs button").forEach((btn) => {
+  btn.onclick = () => {
+    document.querySelectorAll(".tabs button").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    bindMode = btn.dataset.mode;
+    $("fieldText").style.display = bindMode === "har" ? "none" : "block";
+    $("fieldFile").style.display = bindMode === "har" ? "block" : "none";
+    $("tipCurl").style.display = bindMode === "curl" ? "block" : "none";
+    $("tipHar").style.display = bindMode === "har" ? "block" : "none";
+    $("tipToken").style.display = bindMode === "token" ? "block" : "none";
+  };
+});
+
+$("btnSubmitAdd").onclick = async () => {
+  const btn = $("btnSubmitAdd");
+  const fd = new FormData();
+  fd.append("mode", bindMode);
+  fd.append("name", $("accName").value.trim());
+  if ($("accTarget").value) fd.append("account_id", $("accTarget").value);
+
+  if (bindMode === "har") {
+    const f = $("accFile").files[0];
+    if (!f) return toast("请选择 HAR 文件", true);
+    if (f.size > 5 * 1024 * 1024) return toast("请只导出会员相关请求，文件最多5 MiB", true);
+    fd.append("file", f);
+  } else {
+    const text = $("accPayload").value.trim();
+    if (!text) return toast("请粘贴内容", true);
+    fd.append("payload", text);
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span>校验中';
+  try {
+    const res = await api("/api/accounts/bind", { method: "POST", body: fd });
+    closeModal($("modalAdd"));
+    toast(`${res.updated ? "已更新登录" : "已添加"}：${res.name}`);
+    await loadAll();
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "校验并添加";
+  }
+};
+
+$("accounts").addEventListener("click", async (ev) => {
+  const runId = ev.target.dataset.run;
+  const delId = ev.target.dataset.del;
+  const dxId = ev.target.dataset.dx;
+  const checkId = ev.target.dataset.check;
+  if (checkId) {
+    const button = ev.target;
+    button.disabled = true;
+    try {
+      const result = await api(`/api/accounts/${checkId}/status`);
+      const labels = { signed: "今日已签", not_signed: "今日未签", unknown: "暂时无法确认" };
+      const message = `只读核对：小程序${labels[result.mini] || labels.unknown}；App ${labels[result.app] || labels.unknown}`;
+      toast(message + (result.errors?.length ? "。" + result.errors.join("；") : ""), Boolean(result.errors?.length));
+    } catch (error) { toast(error.message, true); }
+    finally { button.disabled = false; }
+  }
+  if (dxId) {
+    const value = prompt(
+      "粘贴从本人设备正常页面采集的设备标识。\n" +
+      "请保留原采集环境，不共用其他账号的标识。\n" +
+      "留空表示清除。"
+    );
+    if (value === null) return;
+    const sourceLabels = { "1": "安卓App", "2": "iPhoneApp", "3": "普通浏览器", "5": "微信小程序" };
+    const sourceValues = Object.fromEntries(Object.entries(sourceLabels).map(([key, label]) => [label, key]));
+    const currentSource = accounts.find(a => String(a.id) === String(dxId))?.dx_source || "5";
+    const sourceLabel = value.trim() ? prompt("标识来自哪里？填写：普通浏览器、安卓App、iPhoneApp、微信小程序", sourceLabels[currentSource]) : null;
+    if (value.trim() && sourceLabel === null) return;
+    if (value.trim() && !sourceValues[sourceLabel.trim()]) { toast("请选择列出的采集来源", true); return; }
+    try {
+      const fd = new FormData();
+      fd.append("dx_token", value.trim());
+      if (value.trim()) fd.append("dx_source", sourceValues[sourceLabel.trim()]);
+      await api(`/api/accounts/${dxId}/dx`, { method: "POST", body: fd });
+      toast(value.trim() ? "设备指纹已保存" : "已清除");
+      await loadAll();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  }
+  if (runId) {
+    const btn = ev.target;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spin"></span>';
+    try {
+      const r = await api(`/api/accounts/${runId}/run`, { method: "POST" });
+      const summary = runResultSummary(r);
+      toast(summary.message, summary.isErr);
+      await loadAll();
+    } catch (e) {
+      toast(e.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "签到";
+    }
+  }
+  if (delId) {
+    if (!confirm("确定删除这个账号？")) return;
+    try {
+      await api(`/api/accounts/${delId}`, { method: "DELETE" });
+      toast("已删除");
+      await loadAll();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  }
+});
+
+function windowLabel() {
+  const text = $("setTime").value || "08:00";
+  const [h, m] = text.split(":").map(Number);
+  const jitter = Math.max(0, Math.min(1439, parseInt($("setJitter").value || "0", 10) || 0));
+  const pad = (n) => String(n).padStart(2, "0");
+  const start = `${pad(h)}:${pad(m)}`;
+  if (!jitter) return start;
+  const endTotal = (h * 60 + m + jitter) % 1440;
+  return `${start}–${pad(Math.floor(endTotal / 60))}:${pad(endTotal % 60)}`;
+}
+function updateWindowTip() {
+  $("setWindowTip").textContent =
+    `每天在窗口 ${windowLabel()} 内选择一个执行时刻。随机时间不能保证通过服务端验证。`;
+}
+
+function updateNotificationFields() {
+  const isPushplus = $("setNotificationProvider").value === "pushplus";
+  $("setWebhookFields").style.display = isPushplus ? "none" : "block";
+  $("setPushplusFields").style.display = isPushplus ? "block" : "none";
+  $("setPushplusState").textContent = pushplusConfigured
+    ? "已保存 token。页面不会回显；留空保留，填写新值则替换。"
+    : "尚未保存 token。请使用 PushPlus 的发送消息 token，不要填写 Secret Key。";
+}
+
+$("btnSettings").onclick = async () => {
+  try {
+    const s = await api("/api/settings");
+    $("setTime").value = s.checkin_time || "08:00";
+    $("setJitter").value = s.checkin_jitter ?? "60";
+    $("setWebhook").value = "";
+    $("setWebhookState").textContent = s.webhook_configured ? "已保存推送地址。页面不回显密钥；留空保留。" : "尚未配置推送地址。";
+    $("setClearWebhook").checked = false;
+    $("setNotificationProvider").value = s.notification_provider || "webhook";
+    pushplusConfigured = Boolean(s.pushplus_configured);
+    $("setPushplusToken").value = "";
+    $("setClearPushplus").checked = false;
+    $("setAppMode").value = s.app_checkin_mode || "manual";
+    updateWindowTip();
+    updateNotificationFields();
+    openModal("modalSettings");
+  } catch (e) {
+    toast(e.message, true);
+  }
+};
+$("setTime").oninput = updateWindowTip;
+$("setJitter").oninput = updateWindowTip;
+$("setNotificationProvider").onchange = updateNotificationFields;
+$("btnCancelSet").onclick = () => {
+  $("setPushplusToken").value = "";
+  closeModal($("modalSettings"));
+};
+
+$("btnSaveSet").onclick = async () => {
+  const fd = new FormData();
+  fd.append("checkin_time", $("setTime").value || "08:00");
+  fd.append("checkin_jitter", $("setJitter").value.trim());
+  fd.append("webhook_url", $("setWebhook").value.trim());
+  fd.append("clear_webhook_url", String($("setClearWebhook").checked));
+  fd.append("app_checkin_mode", $("setAppMode").value);
+  fd.append("notification_provider", $("setNotificationProvider").value);
+  fd.append("pushplus_token", $("setPushplusToken").value);
+  fd.append("clear_pushplus_token", String($("setClearPushplus").checked));
+  try {
+    await api("/api/settings", { method: "POST", body: fd });
+    $("setPushplusToken").value = "";
+    $("setClearPushplus").checked = false;
+    closeModal($("modalSettings"));
+    toast("设置已保存");
+    await loadAll();
+  } catch (e) {
+    toast(e.message, true);
+  }
+};
+
+$("btnTestNotification").onclick = async () => {
+  const btn = $("btnTestNotification");
+  btn.disabled = true;
+  btn.textContent = "正在测试…";
+  try {
+    const result = await api("/api/notifications/test", { method: "POST" });
+    toast(result.message || "已受理，等待投递；请在微信中确认");
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    setTimeout(() => {
+      btn.disabled = false;
+      btn.textContent = "测试已保存的通知设置";
+    }, 5000);
+  }
+};
+
+document.querySelectorAll(".modal").forEach((m) => {
+  m.addEventListener("click", (ev) => { if (ev.target === m) closeModal(m); });
+});
+document.querySelectorAll(".field").forEach(field => {
+  const label = field.querySelector("label");
+  const control = field.querySelector("input[id], select[id], textarea[id]");
+  if (label && control) label.htmlFor = control.id;
+});
+document.addEventListener("keydown", event => {
+  const modal = document.querySelector(".modal.show");
+  if (!modal) return;
+  if (event.key === "Escape") { event.preventDefault(); closeModal(modal); }
+  if (event.key === "Tab") {
+    const controls = [...modal.querySelectorAll("button, input, textarea, select, a[href]")].filter(el => !el.disabled && el.offsetParent !== null);
+    const first = controls[0], last = controls[controls.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+    if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+  }
+});
+
+loadAll();
+setInterval(loadAll, 60000);
+</script>
+</body>
+</html>

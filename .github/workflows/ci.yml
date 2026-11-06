@@ -1,0 +1,74 @@
+name: Offline checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: "3.11"
+          - os: ubuntu-latest
+            python: "3.12"
+          - os: windows-latest
+            python: "3.12"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install test dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Python syntax
+        run: python -m compileall -q app tools tests
+      - name: Offline Python regression tests
+        run: python -m unittest discover -s tests -v
+      - name: Offline login parser tests
+        run: node --test tests/test_official_login.cjs
+
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Initialize with a generated local password
+        run: python tools/manage.py init --generate-password > /dev/null
+      - name: Validate Compose
+        run: docker compose config --quiet
+      - name: Build standard image
+        run: docker compose build
+      - name: Start with automation disabled
+        run: docker compose up -d --wait --wait-timeout 90
+      - name: Verify private console and anonymous health
+        run: |
+          python - <<'PY'
+          import json, urllib.error, urllib.request
+          with urllib.request.urlopen('http://127.0.0.1:8088/api/health', timeout=10) as response:
+              assert json.load(response) == {'ok': True}
+          try:
+              urllib.request.urlopen('http://127.0.0.1:8088/', timeout=10)
+          except urllib.error.HTTPError as response:
+              assert response.code == 401
+          else:
+              raise AssertionError('Console must require authentication')
+          PY
+      - name: Stop local test instance
+        if: always()
+        run: docker compose down

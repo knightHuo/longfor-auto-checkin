@@ -1,0 +1,2 @@
+# Optional local image recognition only; real challenge acceptance remains unverified.
+ddddocr==1.6.1

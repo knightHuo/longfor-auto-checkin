@@ -1,0 +1,37 @@
+name: longfor-auto-checkin
+services:
+  panel:
+    build:
+      context: .
+      args:
+        BASE_IMAGE: ${BASE_IMAGE:-python:3.11-slim}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+    image: longfor-auto-checkin:${RELEASE_TAG:-local}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PANEL_PORT:-8088}:8000"
+    volumes:
+      - ./data:/data
+      - ./secrets/panel-auth.json:/run/secrets/panel-auth.json:ro
+    environment:
+      TZ: Asia/Shanghai
+      DATA_DIR: /data
+      LONGFOR_AUTH_FILE: /run/secrets/panel-auth.json
+      LONGFOR_PUBLIC_ORIGIN: ${LONGFOR_PUBLIC_ORIGIN:-http://127.0.0.1:8088}
+      LONGFOR_SCHEDULE_ENABLED: ${LONGFOR_SCHEDULE_ENABLED:-0}
+      LONGHU_CAPTCHA: "off"
+    command: [uvicorn, app.main:app, --host, 0.0.0.0, --port, "8000", --root-path, "${LONGFOR_ROOT_PATH:-}", --no-access-log]
+    user: "${PANEL_UID:-10001}:${PANEL_GID:-10001}"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 384m
+    cpus: 0.5
+    pids_limit: 128
+    logging:
+      driver: local
+      options:
+        max-size: 5m
+        max-file: "2"

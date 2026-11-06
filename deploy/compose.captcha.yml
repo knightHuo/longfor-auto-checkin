@@ -1,0 +1,17 @@
+# Optional browser/image dependencies. Recognition stays off until real validation.
+services:
+  panel:
+    build:
+      dockerfile: Dockerfile.captcha
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:24-bookworm-slim}
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.11-slim-bookworm}
+    image: longfor-auto-checkin:${RELEASE_TAG:-local}-captcha
+    mem_limit: 1024m
+    cpus: 1.0
+    pids_limit: 256
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    shm_size: 128m
+    environment:
+      LONGHU_CAPTCHA: ${LONGHU_CAPTCHA:-off}
