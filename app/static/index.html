@@ -21,25 +21,20 @@
   <symbol id="i-device" viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10 18h4M10 6h4"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7"/></symbol>
 </svg>
-<aside class="sidebar" aria-label="主导航">
+<div class="sitebar"><div class="sitebar-inner">
   <a class="brand" href="#dashboard" aria-label="龙湖自动签到首页">
     <div class="brand-mark"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg></div>
-    <div><div class="brand-name">龙湖自动签到</div><small>LONGFOR AUTO CHECK-IN</small></div>
+    <span class="brand-name">龙湖自动签到</span>
   </a>
-  <div class="nav-label">WORKSPACE</div>
-  <nav class="nav-links">
-    <a href="#dashboard" class="active" aria-current="location" aria-label="总览"><svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg><span>签到总览</span></a>
-    <a href="#accountSection" aria-label="账号管理"><svg class="icon" aria-hidden="true"><use href="#i-user"/></svg><span>我的账号</span></a>
-    <a href="#activitySection" aria-label="执行记录"><svg class="icon" aria-hidden="true"><use href="#i-log"/></svg><span>最近动态</span></a>
+  <nav class="nav-links" aria-label="主导航">
+    <a href="#dashboard" class="active" aria-current="location" aria-label="总览">总览</a>
+    <a href="#accountSection" aria-label="账号管理">账号</a>
+    <a href="#activitySection" aria-label="执行记录">活动</a>
   </nav>
-  <div class="sidebar-bottom">
-    <a href="https://github.com/knightHuo/longfor-auto-checkin" target="_blank" rel="noopener noreferrer" aria-label="GitHub 开源项目"><svg class="icon" aria-hidden="true"><use href="#i-external"/></svg><span>开源项目</span></a>
-    <p>LONGFOR AUTO CHECK-IN<br>自托管 · 预览版</p>
-  </div>
-</aside>
+</div></div>
 <main class="wrap" id="dashboard">
   <header>
-    <div><div class="eyebrow">每日签到 · <span id="todayDate">—</span></div><h1>签到总览</h1><p class="page-intro">两个入口的进度，清楚掌握。</p></div>
+    <div><h1>今日概览</h1><p class="page-intro" id="todayDate">—</p></div>
     <div class="actions">
       <button id="btnSettings" class="ghost"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg>设置</button>
       <button id="btnAdd" class="primary"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>添加账号</button>
@@ -47,15 +42,13 @@
   </header>
 
   <div class="data-alert" id="loadError" role="status" hidden><div><b>暂时无法更新数据</b><span id="loadErrorMessage">请检查网络后重试。</span></div><button id="btnRetry" class="small">重新加载</button></div>
-  <div class="setup-note" id="setupNote" hidden></div>
   <section class="overview" id="overview" aria-label="运行概览"><div class="loading-state">正在读取今日进度…</div></section>
 
-  <div class="section-heading" id="accountSection"><div><h2>我的账号 <span class="section-count" id="accountCount">0 个账号</span></h2><p>会员资料与双入口签到进度</p></div><span class="section-meta"><i class="status-dot"></i> 每分钟更新</span></div>
+  <div class="section-heading" id="accountSection"><h2>账号 <span class="section-count" id="accountCount">0</span></h2><span class="section-meta">自动更新</span></div>
   <div id="accounts" class="grid"></div>
 
-  <div class="section-heading" id="activitySection"><div><h2>最近动态</h2><p>查看执行结果和需要处理的提醒</p></div></div>
-  <div class="logs" id="logs"></div>
-  <footer class="project-note"><span>Longfor Auto Check-in · 非龙湖官方产品</span><a href="https://github.com/knightHuo/longfor-auto-checkin" target="_blank" rel="noopener noreferrer">项目与使用说明 ↗</a></footer>
+  <details class="activity-panel" id="activitySection"><summary><span>最近活动 <span id="activityCount"></span></span><span class="disclosure" aria-hidden="true">⌄</span></summary><div id="logs" class="logs"></div></details>
+  <footer class="project-note"><span>Longfor Auto Check-in · 预览版 · 非官方产品</span><a href="https://github.com/knightHuo/longfor-auto-checkin" target="_blank" rel="noopener noreferrer">使用说明 ↗</a></footer>
 </main>
 
 <!-- 添加账号 -->
@@ -244,7 +237,8 @@ function entryResult(acc, key) {
   const labels = { ok: "已签到", already: "今日已签", todo: "待确认", risk: "需要验证", fail: "失败", conflict: "指纹冲突", skipped: "已跳过", retry: "等待重试", busy: "执行中", pending: "待执行" };
   const cls = ["ok", "already"].includes(status) ? "b-ok" : ["fail", "risk", "conflict"].includes(status) ? "b-fail" : "b-pending";
   const message = status === "pending" ? "今日尚无执行结果" : status === "skipped" ? "已关闭 App 入口" : acc[isApp ? "app_last_message" : "last_message"] || "";
-  return `<div class="entry-result"><div class="name">${icon(isApp ? "device" : "grid")}${isApp ? "App 签到" : "小程序签到"}</div><span class="badge ${cls}">${labels[status] || "状态未知"}</span><div class="note">${escapeHtml(message)}</div></div>`;
+  const showDetail = !["ok", "already"].includes(status);
+  return `<div class="entry-result"><div class="entry-line"><span class="name">${isApp ? "App" : "小程序"}</span><span class="badge ${cls}">${labels[status] || "状态未知"}</span></div>${showDetail ? `<div class="note">${escapeHtml(message)}</div>` : ""}</div>`;
 }
 
 function renderOverview(o) {
@@ -252,32 +246,19 @@ function renderOverview(o) {
   const total = Math.max(0, Number(o.total) || 0);
   const done = (Number(s.ok) || 0) + (Number(s.already) || 0);
   const pending = ["pending", "fail", "conflict", "risk", "retry", "busy"].reduce((count, key) => count + (Number(s[key]) || 0), 0);
-  const progress = total ? Math.min(100, Math.round(done / total * 100)) : 0;
-  const complete = total > 0 && done === total;
-  const headline = !total ? "从一个账号开始" : complete ? "今日任务已完成" : s.partial ? "还有入口需要处理" : "今日进度，尽在掌握";
-  const note = !total ? "导入登录凭据，开启你的签到日常" : complete ? (appCheckinMode === "off" ? "已开启的签到入口均已确认" : "两个入口的结果已分别确认") : `${total} 个账号中，${done} 个已完成今日签到`;
   const paused = o.schedule_enabled === false;
   const [nextDate, nextTime] = String(o.next_run || "").split(" ");
-  $("todayDate").textContent = (o.today || "—").replaceAll("-", ".");
-  $("setupNote").hidden = o.schedule_enabled !== false;
-  $("setupNote").innerHTML = '自动调度已暂停 · 可先导入账号、补齐设备标识并核对状态，再按 <a href="https://github.com/knightHuo/longfor-auto-checkin#快速开始" target="_blank" rel="noopener noreferrer">安装说明</a>开启。';
+  $("todayDate").textContent = o.today ? new Date(o.today + "T12:00:00+08:00").toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "long", timeZone: "Asia/Shanghai" }) : "—";
   $("overview").innerHTML = `
-    <div class="progress-panel">
-      <div class="progress-ring" style="--progress:${progress}%" role="img" aria-label="今日${done}个账号完成，共${total}个账号"><div class="ring-core"><div class="ring-value">${done}<small>/ ${total}</small></div><div class="ring-label">今日完成</div></div></div>
-      <div class="progress-copy"><div class="panel-eyebrow">每日进度</div><h2>${headline}</h2><p>${note}</p><span class="progress-state"><i class="status-dot"></i>${appCheckinMode === "off" ? "小程序入口" : "小程序 + App 双入口"}</span></div>
-    </div>
-    <div class="schedule-panel"><div class="schedule-label">下次执行${icon("clock")}</div><div class="schedule-time ${paused ? "paused" : ""}">${paused ? "已暂停" : escapeHtml(nextTime || "—")}</div><div class="schedule-date">${paused ? "可先手动核对账号状态" : escapeHtml(nextDate || "等待排程")}</div><div class="schedule-foot">${paused ? "开启后按设定窗口自动执行" : "北京时间 · 按设定窗口自动执行"}</div></div>
-    <div class="quick-stats">
-      <div class="stat"><div class="label">${appCheckinMode === "off" ? "今日签到完成" : "双端已完成"}</div><div class="value" style="color:var(--green)">${done}<small>个账号</small></div></div>
-      <div class="stat"><div class="label">部分完成</div><div class="value" style="color:var(--amber)">${s.partial || 0}<small>个账号</small></div></div>
-      <div class="stat"><div class="label">待执行 / 待处理</div><div class="value" style="color:${s.fail || s.risk || s.conflict ? 'var(--red)' : 'var(--text)'}">${pending}<small>个账号</small></div></div>
-      <div class="stat"><div class="label">预计登录有效期</div><div class="value">${o.min_days == null ? "—" : o.min_days}<small>天</small></div></div>
-    </div>
+    <div class="stat"><div class="label">${appCheckinMode === "off" ? "小程序完成" : "双端完成"}</div><div class="value">${done}<small>/ ${total}</small></div></div>
+    <div class="stat"><div class="label">部分完成</div><div class="value">${s.partial || 0}</div></div>
+    <div class="stat"><div class="label">待执行 / 待处理</div><div class="value ${s.fail || s.risk || s.conflict ? 'attention' : ''}">${pending}</div></div>
+    <div class="stat schedule-stat"><div class="label">${paused ? "自动签到" : "下次执行 · 北京时间"}</div><div class="value schedule-time ${paused ? 'paused' : ''}">${paused ? "已暂停" : escapeHtml(nextTime || "—")}</div><div class="schedule-caption">${paused ? '<a href="https://github.com/knightHuo/longfor-auto-checkin#快速开始" target="_blank" rel="noopener noreferrer">了解如何开启 ↗</a>' : escapeHtml(nextDate || "等待排程")}</div></div>
   `;
 }
 
 function renderAccounts() {
-  $("accountCount").textContent = `${accounts.length} 个账号`;
+  $("accountCount").textContent = accounts.length;
   if (!accounts.length) {
     $("accounts").innerHTML = `<div class="empty" style="grid-column:1/-1">
       <b>从自己的账号开始</b>添加登录凭据 → 补齐真实设备标识 → 核对两个入口的状态。需要验证时，在官方页面完成。
@@ -287,17 +268,15 @@ function renderAccounts() {
   $("accounts").innerHTML = accounts.map((a) => {
     const [cls, label] = statusBadge(a);
     const days = a.days_left === null || a.days_left === undefined ? null : a.days_left;
-    const pct = days === null ? 0 : Math.max(2, Math.min(100, (days / 30) * 100));
-    const barCls = days === null ? "" : days <= 3 ? "danger" : days <= 7 ? "warn" : "";
     const dayText = days === null ? "未知" : `剩 ${days} 天`;
     const sharedWith = (a.dx_shared_with || []).join("、");
     const dxLabel = !a.has_dx ? "待补" : a.dx_conflict ? "与他人共用" : a.dx_shared ? "已配置（被共用）" : "已配置";
-    const dxColor = !a.has_dx ? "var(--amber)" : a.dx_conflict ? "var(--red)" : "var(--green)";
+    const dxColor = !a.has_dx ? "var(--amber)" : a.dx_conflict ? "var(--red)" : "var(--dim)";
     const dxTitle = sharedWith ? `与「${sharedWith}」使用同一指纹，会触发风控` : "";
     return `
     <div class="card" data-id="${a.id}">
       <div class="card-head">
-        <div class="card-identity"><div class="account-avatar">${icon("user")}</div><div>
+        <div class="card-identity"><div>
           <div class="card-name">${escapeHtml(a.name)}</div>
           <div class="card-sub"><span style="color:${dxColor}" title="${escapeHtml(dxTitle)}">设备${dxLabel}${a.has_dx ? ` · ${escapeHtml(a.dx_source_label || "来源待确认")}` : ""}</span></div>
           ${a.dx_conflict ? `<div style="margin-top:6px;font-size:12px;color:var(--red)">已暂停签到：与「${escapeHtml(sharedWith)}」共用指纹，请从本人独立设备环境重新采集</div>` : ""}
@@ -310,8 +289,7 @@ function renderAccounts() {
         <div class="metric"><div class="k">珑珠</div><div class="v gold">${a.balance ?? 0}</div></div>
       </div>
       <div class="entry-results">${entryResult(a, "mini")}${entryResult(a, "app")}</div>
-      <div class="bar-label"><span>登录有效期（估算）</span><span>${dayText}</span></div>
-      <div class="bar ${barCls}"><i style="width:${pct}%"></i></div>
+      <div class="session-note"><span>登录有效期（估算）</span><span>${dayText}</span></div>
       <div class="card-foot">
         <button class="small" data-check="${a.id}" title="只查询官方状态，不续期或提交签到">${icon("refresh")}核对状态</button>
         <button class="small" data-dx="${a.id}">${icon("device")}${a.has_dx ? "设备" : "补设备"}</button>
@@ -323,6 +301,7 @@ function renderAccounts() {
 }
 
 function renderLogs(logs) {
+  $("activityCount").textContent = `${logs?.length || 0} 条`;
   if (!logs || !logs.length) {
     $("logs").innerHTML = `<div class="log-row"><div class="m">暂无记录</div></div>`;
     return;
@@ -609,6 +588,7 @@ document.addEventListener("keydown", event => {
 });
 document.querySelectorAll(".nav-links a").forEach(link => {
   link.addEventListener("click", () => {
+    if (link.hash === "#activitySection") $("activitySection").open = true;
     document.querySelectorAll(".nav-links a").forEach(item => { item.classList.remove("active"); item.removeAttribute("aria-current"); });
     link.classList.add("active");
     link.setAttribute("aria-current", "location");
