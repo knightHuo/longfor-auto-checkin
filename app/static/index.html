@@ -5,174 +5,58 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="app-root" content="__APP_ROOT__">
 <title>龙湖自动签到 · Longfor Auto Check-in</title>
-<style>
-  :root {
-    --bg: #0b0d11;
-    --card: #14171d;
-    --card-2: #191d25;
-    --line: #242a34;
-    --text: #e9edf4;
-    --dim: #8b95a6;
-    --gold: #f0b429;
-    --blue: #4d8bfe;
-    --green: #3fb950;
-    --red: #f85149;
-    --amber: #d9a536;
-    --radius: 14px;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    background: radial-gradient(900px 500px at 15% -10%, #1a2233 0%, transparent 60%), var(--bg);
-    color: var(--text);
-    font: 14px/1.6 -apple-system, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
-    min-height: 100vh;
-    padding-bottom: 60px;
-  }
-  .wrap { max-width: 1080px; margin: 0 auto; padding: 28px 20px; }
-
-  header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 26px; flex-wrap: wrap; }
-  .brand { display: flex; align-items: center; gap: 10px; font-size: 19px; font-weight: 600; letter-spacing: .3px; }
-  .brand .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 12px var(--gold); }
-  .brand small { display:block; color:var(--dim); font-size:11px; font-weight:400; letter-spacing:.5px; }
-  .setup-note { border:1px solid #514120; background:#1c1912; padding:12px 16px; border-radius:12px; margin-bottom:18px; color:#e9c984; }
-  .setup-note a, .project-note a { color:var(--blue); }
-  .project-note { color:var(--dim); font-size:12px; margin-top:24px; }
-  .actions { display: flex; gap: 10px; }
-
-  button {
-    font: inherit; cursor: pointer; border-radius: 10px; border: 1px solid var(--line);
-    background: var(--card-2); color: var(--text); padding: 8px 15px; transition: .16s;
-  }
-  button:hover { border-color: #39414f; background: #1e2430; }
-  button.primary { background: linear-gradient(180deg, #f3bd3f, #dea01d); color: #2a1d00; border-color: #e5ad2c; font-weight: 600; }
-  button.primary:hover { filter: brightness(1.07); }
-  button.ghost { background: transparent; }
-  button.danger { color: var(--red); border-color: #3a2226; background: #1d1416; }
-  button.small { padding: 5px 11px; font-size: 13px; }
-  button:disabled { opacity: .5; cursor: not-allowed; }
-  button:focus-visible, a:focus-visible { outline:2px solid var(--blue); outline-offset:3px; }
-
-  .overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 26px; }
-  .stat { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 15px 17px; }
-  .stat .label { color: var(--dim); font-size: 12.5px; }
-  .stat .value { font-size: 23px; font-weight: 600; margin-top: 3px; letter-spacing: .5px; }
-  .stat .value small { font-size: 12px; color: var(--dim); font-weight: 400; margin-left: 3px; }
-
-  h2 { font-size: 15px; font-weight: 600; color: #b9c2d0; margin: 0 0 13px; letter-spacing: .4px; }
-
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 14px; margin-bottom: 32px; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; position: relative; overflow: hidden; }
-  .card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 2px; background: linear-gradient(90deg, transparent, var(--gold), transparent); opacity: .35; }
-  .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 15px; }
-  .card-name { font-size: 16px; font-weight: 600; }
-  .card-sub { color: var(--dim); font-size: 12px; margin-top: 2px; font-family: ui-monospace, Menlo, monospace; }
-
-  .badge { font-size: 11.5px; padding: 3px 9px; border-radius: 20px; white-space: nowrap; border: 1px solid transparent; }
-  .b-ok { color: var(--green); background: #12251a; border-color: #1d3a28; }
-  .b-already { color: #7ba7e8; background: #121c2b; border-color: #1d2c42; }
-  .b-fail { color: var(--red); background: #261316; border-color: #3d1f23; }
-  .b-pending { color: var(--amber); background: #241d10; border-color: #3a2f18; }
-  .entry-results { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 15px; }
-  .entry-result { border: 1px solid var(--line); border-radius: 9px; padding: 10px; min-width: 0; }
-  .entry-result .name { color: var(--dim); font-size: 12px; margin-bottom: 7px; }
-  .entry-result .note { color: var(--dim); font-size: 11px; margin-top: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-  .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 15px; }
-  .metric .k { color: var(--dim); font-size: 11.5px; }
-  .metric .v { font-size: 17px; font-weight: 600; margin-top: 1px; }
-  .metric .v.gold { color: var(--gold); }
-
-  .bar-label { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--dim); margin-bottom: 5px; }
-  .bar { height: 5px; background: #1e232c; border-radius: 4px; overflow: hidden; }
-  .bar > i { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, #2fa04a, #4bbd67); transition: width .4s; }
-  .bar.warn > i { background: linear-gradient(90deg, #c98a1c, #e5b23c); }
-  .bar.danger > i { background: linear-gradient(90deg, #c0332c, #ef5b53); }
-
-  .card-foot { display: flex; gap: 8px; margin-top: 15px; padding-top: 14px; border-top: 1px solid var(--line); }
-  .card-foot .msg { flex: 1; font-size: 12px; color: var(--dim); align-self: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-  .empty { border: 1px dashed var(--line); border-radius: var(--radius); padding: 44px 20px; text-align: center; color: var(--dim); }
-  .empty b { display: block; color: var(--text); margin-bottom: 6px; font-size: 15px; }
-
-  .logs { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
-  .log-row { display: grid; grid-template-columns: 118px 96px 66px 1fr; gap: 12px; padding: 10px 16px; font-size: 12.5px; border-bottom: 1px solid #1b2029; align-items: center; }
-  .log-row:last-child { border-bottom: 0; }
-  .log-row .t { color: var(--dim); font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }
-  .log-row .n { color: #c3cbd8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .log-row .a { color: var(--dim); }
-  .log-row .m { color: #9aa5b6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .s-ok { color: var(--green); }
-  .s-fail { color: var(--red); }
-  .s-already { color: #7ba7e8; }
-  .s-todo { color: var(--amber); }
-
-  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.66); backdrop-filter: blur(4px); display: none; align-items: center; justify-content: center; padding: 20px; z-index: 50; }
-  .modal.show { display: flex; }
-  .dialog { background: #12151b; border: 1px solid var(--line); border-radius: 16px; width: 100%; max-width: 560px; max-height: 88vh; overflow-y: auto; padding: 22px; }
-  .dialog h3 { margin: 0 0 4px; font-size: 17px; }
-  .dialog-foot { position:sticky; bottom:-22px; background:#12151b; padding-bottom:12px; }
-  .dialog .hint { color: var(--dim); font-size: 12.5px; margin-bottom: 16px; }
-  .field { margin-bottom: 14px; }
-  .field label { display: block; font-size: 12.5px; color: var(--dim); margin-bottom: 6px; }
-  input[type=text], input[type=password], textarea, input[type=time], input[type=number], select {
-    width: 100%; background: #0d1015; border: 1px solid var(--line); border-radius: 10px;
-    color: var(--text); padding: 10px 12px; font: inherit; outline: none; transition: .15s;
-  }
-  select { appearance: none; -webkit-appearance: none; cursor: pointer;
-    background-image: linear-gradient(45deg, transparent 50%, #6b7688 50%), linear-gradient(135deg, #6b7688 50%, transparent 50%);
-    background-position: calc(100% - 18px) calc(50% + 1px), calc(100% - 13px) calc(50% + 1px);
-    background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
-  input[type=number]::-webkit-inner-spin-button,
-  input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-  input:focus, textarea:focus { border-color: #3a4a66; box-shadow: 0 0 0 3px rgba(77,139,254,.12); }
-  textarea { resize: vertical; min-height: 132px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; line-height: 1.5; }
-
-  .tabs { display: flex; gap: 6px; background: #0d1015; padding: 4px; border-radius: 11px; border: 1px solid var(--line); margin-bottom: 16px; }
-  .tabs button { flex: 1; border: 0; background: transparent; padding: 7px; font-size: 13px; color: var(--dim); border-radius: 8px; }
-  .tabs button.active { background: #1e2530; color: var(--text); }
-
-  .dialog-foot { display: flex; justify-content: flex-end; gap: 9px; margin-top: 18px; }
-  .tips { background: #101720; border: 1px solid #1d2a3a; border-radius: 10px; padding: 11px 13px; font-size: 12px; color: #8fa4bd; line-height: 1.65; margin-bottom: 14px; }
-  .tips code { background: #1a2330; padding: 1px 5px; border-radius: 4px; font-size: 11.5px; color: #a8c0dd; }
-
-  #toast { position: fixed; left: 50%; bottom: 34px; transform: translateX(-50%) translateY(20px); background: #1c222c; border: 1px solid var(--line); color: var(--text); padding: 11px 20px; border-radius: 11px; opacity: 0; pointer-events: none; transition: .25s; z-index: 100; font-size: 13px; max-width: 88vw; }
-  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-  #toast.err { border-color: #4a2226; color: #ff9d96; }
-
-  .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid #ffffff33; border-top-color: #fff; border-radius: 50%; animation: rot .7s linear infinite; vertical-align: -1px; margin-right: 6px; }
-  @keyframes rot { to { transform: rotate(360deg); } }
-
-  @media (max-width: 640px) {
-    .wrap { padding: 18px 14px; }
-    .log-row { grid-template-columns: 1fr auto; gap: 4px 10px; }
-    .log-row .t { grid-column: 1; }
-    .log-row .m { grid-column: 1 / -1; }
-    .log-row .a, .log-row .n { display: none; }
-  }
-</style>
-<style>@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}</style>
+<link rel="stylesheet" href="__APP_ROOT__/static/styles.css">
 </head>
 <body>
-<div class="wrap">
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2.5" fill="currentColor" stroke="none"/><circle cx="15" cy="17" r="2.5" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-log" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 3h7v7M21 3l-10 10M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5M6 6a8 8 0 0 1 13 2M5 16a8 8 0 0 0 13 2"/></symbol>
+  <symbol id="i-device" viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10 18h4M10 6h4"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7"/></symbol>
+</svg>
+<aside class="sidebar" aria-label="主导航">
+  <a class="brand" href="#dashboard" aria-label="龙湖自动签到首页">
+    <div class="brand-mark"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg></div>
+    <div><div class="brand-name">龙湖自动签到</div><small>LONGFOR AUTO CHECK-IN</small></div>
+  </a>
+  <div class="nav-label">WORKSPACE</div>
+  <nav class="nav-links">
+    <a href="#dashboard" class="active" aria-current="location" aria-label="总览"><svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg><span>签到总览</span></a>
+    <a href="#accountSection" aria-label="账号管理"><svg class="icon" aria-hidden="true"><use href="#i-user"/></svg><span>我的账号</span></a>
+    <a href="#activitySection" aria-label="执行记录"><svg class="icon" aria-hidden="true"><use href="#i-log"/></svg><span>最近动态</span></a>
+  </nav>
+  <div class="sidebar-bottom">
+    <a href="https://github.com/knightHuo/longfor-auto-checkin" target="_blank" rel="noopener noreferrer" aria-label="GitHub 开源项目"><svg class="icon" aria-hidden="true"><use href="#i-external"/></svg><span>开源项目</span></a>
+    <p>LONGFOR AUTO CHECK-IN<br>自托管 · 预览版</p>
+  </div>
+</aside>
+<main class="wrap" id="dashboard">
   <header>
-    <div class="brand"><span class="dot"></span><div>龙湖自动签到<small>Longfor Auto Check-in · 预览版</small></div></div>
+    <div><div class="eyebrow">每日签到 · <span id="todayDate">—</span></div><h1>签到总览</h1><p class="page-intro">两个入口的进度，清楚掌握。</p></div>
     <div class="actions">
-      <button id="btnSettings" class="ghost">设置</button>
-      <button id="btnAdd" class="primary">添加账号</button>
+      <button id="btnSettings" class="ghost"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg>设置</button>
+      <button id="btnAdd" class="primary"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>添加账号</button>
     </div>
   </header>
 
+  <div class="data-alert" id="loadError" role="status" hidden><div><b>暂时无法更新数据</b><span id="loadErrorMessage">请检查网络后重试。</span></div><button id="btnRetry" class="small">重新加载</button></div>
   <div class="setup-note" id="setupNote" hidden></div>
-  <section class="overview" id="overview" aria-label="运行概览"></section>
+  <section class="overview" id="overview" aria-label="运行概览"><div class="loading-state">正在读取今日进度…</div></section>
 
-  <h2>账号</h2>
+  <div class="section-heading" id="accountSection"><div><h2>我的账号 <span class="section-count" id="accountCount">0 个账号</span></h2><p>会员资料与双入口签到进度</p></div><span class="section-meta"><i class="status-dot"></i> 每分钟更新</span></div>
   <div id="accounts" class="grid"></div>
 
-  <h2>最近日志</h2>
+  <div class="section-heading" id="activitySection"><div><h2>最近动态</h2><p>查看执行结果和需要处理的提醒</p></div></div>
   <div class="logs" id="logs"></div>
-  <p class="project-note">开源、自托管 · <a href="https://github.com/knightHuo/longfor-auto-checkin" target="_blank" rel="noopener noreferrer">项目与使用说明</a> · 非龙湖官方产品</p>
-</div>
+  <footer class="project-note"><span>Longfor Auto Check-in · 非龙湖官方产品</span><a href="https://github.com/knightHuo/longfor-auto-checkin" target="_blank" rel="noopener noreferrer">项目与使用说明 ↗</a></footer>
+</main>
 
 <!-- 添加账号 -->
 <div class="modal" id="modalAdd">
@@ -283,6 +167,7 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
+const icon = (name) => `<svg class="icon" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const API_BASE = document.querySelector('meta[name="app-root"]').content.replace(/\/$/, "");
 let accounts = [];
 let bindMode = "curl";
@@ -290,6 +175,7 @@ let pushplusConfigured = false;
 let businessToday = "";
 let appCheckinMode = "auto";
 let modalOpener = null;
+let hasLoaded = false;
 
 function openModal(id) {
   modalOpener = document.activeElement;
@@ -358,24 +244,40 @@ function entryResult(acc, key) {
   const labels = { ok: "已签到", already: "今日已签", todo: "待确认", risk: "需要验证", fail: "失败", conflict: "指纹冲突", skipped: "已跳过", retry: "等待重试", busy: "执行中", pending: "待执行" };
   const cls = ["ok", "already"].includes(status) ? "b-ok" : ["fail", "risk", "conflict"].includes(status) ? "b-fail" : "b-pending";
   const message = status === "pending" ? "今日尚无执行结果" : status === "skipped" ? "已关闭 App 入口" : acc[isApp ? "app_last_message" : "last_message"] || "";
-  return `<div class="entry-result"><div class="name">${isApp ? "App" : "小程序"}</div><span class="badge ${cls}">${labels[status] || "状态未知"}</span><div class="note" title="${escapeHtml(message)}">${escapeHtml(message)}</div></div>`;
+  return `<div class="entry-result"><div class="name">${icon(isApp ? "device" : "grid")}${isApp ? "App 签到" : "小程序签到"}</div><span class="badge ${cls}">${labels[status] || "状态未知"}</span><div class="note">${escapeHtml(message)}</div></div>`;
 }
 
 function renderOverview(o) {
   const s = o.stats || {};
+  const total = Math.max(0, Number(o.total) || 0);
+  const done = (Number(s.ok) || 0) + (Number(s.already) || 0);
+  const pending = ["pending", "fail", "conflict", "risk", "retry", "busy"].reduce((count, key) => count + (Number(s[key]) || 0), 0);
+  const progress = total ? Math.min(100, Math.round(done / total * 100)) : 0;
+  const complete = total > 0 && done === total;
+  const headline = !total ? "从一个账号开始" : complete ? "今日任务已完成" : s.partial ? "还有入口需要处理" : "今日进度，尽在掌握";
+  const note = !total ? "导入登录凭据，开启你的签到日常" : complete ? (appCheckinMode === "off" ? "已开启的签到入口均已确认" : "两个入口的结果已分别确认") : `${total} 个账号中，${done} 个已完成今日签到`;
+  const paused = o.schedule_enabled === false;
+  const [nextDate, nextTime] = String(o.next_run || "").split(" ");
+  $("todayDate").textContent = (o.today || "—").replaceAll("-", ".");
   $("setupNote").hidden = o.schedule_enabled !== false;
-  $("setupNote").innerHTML = '自动调度已暂停。先导入账号、补齐真实设备标识并核对状态，再按 <a href="https://github.com/knightHuo/longfor-auto-checkin#快速开始" target="_blank" rel="noopener noreferrer">安装说明</a>开启。';
+  $("setupNote").innerHTML = '自动调度已暂停 · 可先导入账号、补齐设备标识并核对状态，再按 <a href="https://github.com/knightHuo/longfor-auto-checkin#快速开始" target="_blank" rel="noopener noreferrer">安装说明</a>开启。';
   $("overview").innerHTML = `
-    <div class="stat"><div class="label">账号总数</div><div class="value">${o.total}<small>个</small></div></div>
-    <div class="stat"><div class="label">${appCheckinMode === "off" ? "今日签到完成" : "今日双端完成"}</div><div class="value" style="color:var(--green)">${(s.ok || 0) + (s.already || 0)}<small>个</small></div></div>
-    <div class="stat"><div class="label">部分完成</div><div class="value" style="color:var(--amber)">${s.partial || 0}<small>个</small></div></div>
-    <div class="stat"><div class="label">待执行 / 待处理</div><div class="value" style="color:${((s.fail||0) + (s.conflict||0) + (s.risk||0)) > 0 ? 'var(--red)' : 'var(--amber)'}">${(s.pending || 0) + (s.fail || 0) + (s.conflict || 0) + (s.risk || 0) + (s.retry || 0) + (s.busy || 0)}<small>个</small></div></div>
-    <div class="stat"><div class="label">预计登录有效期</div><div class="value">${o.min_days === null ? "—" : o.min_days}<small>天</small></div></div>
-    <div class="stat"><div class="label">下次执行</div><div class="value" style="font-size:15px;padding-top:6px">${o.schedule_enabled === false ? "自动调度已暂停" : (o.next_run || "—")}</div></div>
+    <div class="progress-panel">
+      <div class="progress-ring" style="--progress:${progress}%" role="img" aria-label="今日${done}个账号完成，共${total}个账号"><div class="ring-core"><div class="ring-value">${done}<small>/ ${total}</small></div><div class="ring-label">今日完成</div></div></div>
+      <div class="progress-copy"><div class="panel-eyebrow">每日进度</div><h2>${headline}</h2><p>${note}</p><span class="progress-state"><i class="status-dot"></i>${appCheckinMode === "off" ? "小程序入口" : "小程序 + App 双入口"}</span></div>
+    </div>
+    <div class="schedule-panel"><div class="schedule-label">下次执行${icon("clock")}</div><div class="schedule-time ${paused ? "paused" : ""}">${paused ? "已暂停" : escapeHtml(nextTime || "—")}</div><div class="schedule-date">${paused ? "可先手动核对账号状态" : escapeHtml(nextDate || "等待排程")}</div><div class="schedule-foot">${paused ? "开启后按设定窗口自动执行" : "北京时间 · 按设定窗口自动执行"}</div></div>
+    <div class="quick-stats">
+      <div class="stat"><div class="label">${appCheckinMode === "off" ? "今日签到完成" : "双端已完成"}</div><div class="value" style="color:var(--green)">${done}<small>个账号</small></div></div>
+      <div class="stat"><div class="label">部分完成</div><div class="value" style="color:var(--amber)">${s.partial || 0}<small>个账号</small></div></div>
+      <div class="stat"><div class="label">待执行 / 待处理</div><div class="value" style="color:${s.fail || s.risk || s.conflict ? 'var(--red)' : 'var(--text)'}">${pending}<small>个账号</small></div></div>
+      <div class="stat"><div class="label">预计登录有效期</div><div class="value">${o.min_days == null ? "—" : o.min_days}<small>天</small></div></div>
+    </div>
   `;
 }
 
 function renderAccounts() {
+  $("accountCount").textContent = `${accounts.length} 个账号`;
   if (!accounts.length) {
     $("accounts").innerHTML = `<div class="empty" style="grid-column:1/-1">
       <b>从自己的账号开始</b>添加登录凭据 → 补齐真实设备标识 → 核对两个入口的状态。需要验证时，在官方页面完成。
@@ -395,11 +297,11 @@ function renderAccounts() {
     return `
     <div class="card" data-id="${a.id}">
       <div class="card-head">
-        <div>
+        <div class="card-identity"><div class="account-avatar">${icon("user")}</div><div>
           <div class="card-name">${escapeHtml(a.name)}</div>
-          <div class="card-sub">${a.token_mask || ""} · <span style="color:${dxColor}" title="${escapeHtml(dxTitle)}">指纹${dxLabel}${a.has_dx ? ` · ${escapeHtml(a.dx_source_label || "来源待确认")}` : ""}</span></div>
+          <div class="card-sub"><span style="color:${dxColor}" title="${escapeHtml(dxTitle)}">设备${dxLabel}${a.has_dx ? ` · ${escapeHtml(a.dx_source_label || "来源待确认")}` : ""}</span></div>
           ${a.dx_conflict ? `<div style="margin-top:6px;font-size:12px;color:var(--red)">已暂停签到：与「${escapeHtml(sharedWith)}」共用指纹，请从本人独立设备环境重新采集</div>` : ""}
-        </div>
+        </div></div>
         <span class="badge ${cls}">${label}</span>
       </div>
       <div class="metrics">
@@ -411,10 +313,10 @@ function renderAccounts() {
       <div class="bar-label"><span>登录有效期（估算）</span><span>${dayText}</span></div>
       <div class="bar ${barCls}"><i style="width:${pct}%"></i></div>
       <div class="card-foot">
-        <button class="small" data-check="${a.id}" title="只查询官方状态，不续期或提交签到">核对状态</button>
-        <button class="small" data-dx="${a.id}">${a.has_dx ? "设备" : "补设备"}</button>
-        <button class="small" data-run="${a.id}">签到</button>
-        <button class="small danger" data-del="${a.id}">删除</button>
+        <button class="small" data-check="${a.id}" title="只查询官方状态，不续期或提交签到">${icon("refresh")}核对状态</button>
+        <button class="small" data-dx="${a.id}">${icon("device")}${a.has_dx ? "设备" : "补设备"}</button>
+        <button class="small" data-run="${a.id}">${icon("check")}签到</button>
+        <button class="small danger" data-del="${a.id}">${icon("trash")}删除</button>
       </div>
     </div>`;
   }).join("");
@@ -425,7 +327,7 @@ function renderLogs(logs) {
     $("logs").innerHTML = `<div class="log-row"><div class="m">暂无记录</div></div>`;
     return;
   }
-  $("logs").innerHTML = logs.map((l) => {
+  $("logs").innerHTML = '<div class="log-head" aria-hidden="true"><span>时间</span><span>账号</span><span>操作</span><span>执行结果</span></div>' + logs.map((l) => {
     const scls = l.status === "ok" ? "s-ok"
       : (l.status === "fail" || l.status === "risk") ? "s-fail"
       : l.status === "already" ? "s-already" : ["todo", "retry", "busy"].includes(l.status) ? "s-todo" : "";
@@ -433,7 +335,7 @@ function renderLogs(logs) {
     return `<div class="log-row">
       <div class="t">${(l.ts || "").replace("T", " ").slice(5, 16)}</div>
       <div class="n">${escapeHtml(l.account_name || "")}</div>
-      <div class="a">${names[l.action] || l.action || ""}</div>
+      <div class="a">${escapeHtml(names[l.action] || l.action || "")}</div>
       <div class="m"><span class="${scls}">${escapeHtml(l.message || "")}</span></div>
     </div>`;
   }).join("");
@@ -446,6 +348,7 @@ function escapeHtml(s) {
 }
 
 async function loadAll() {
+  $("btnRetry").disabled = true;
   try {
     const [overview, accs, logs] = await Promise.all([
       api("/api/overview"), api("/api/accounts"), api("/api/logs?limit=40"),
@@ -456,10 +359,17 @@ async function loadAll() {
     accounts = accs;
     renderAccounts();
     renderLogs(logs);
+    hasLoaded = true;
+    $("loadError").hidden = true;
   } catch (e) {
-    toast(e.message, true);
+    $("loadError").hidden = false;
+    $("loadErrorMessage").textContent = (hasLoaded ? "当前可能是上次的记录。" : "") + e.message;
+    if (!hasLoaded) $("overview").innerHTML = "";
+  } finally {
+    $("btnRetry").disabled = false;
   }
 }
+$("btnRetry").onclick = loadAll;
 
 // ---- 交互 ----
 $("btnAdd").onclick = () => {
@@ -518,12 +428,14 @@ $("btnSubmitAdd").onclick = async () => {
 };
 
 $("accounts").addEventListener("click", async (ev) => {
-  const runId = ev.target.dataset.run;
-  const delId = ev.target.dataset.del;
-  const dxId = ev.target.dataset.dx;
-  const checkId = ev.target.dataset.check;
+  const action = ev.target.closest("button");
+  if (!action || !$("accounts").contains(action)) return;
+  const runId = action.dataset.run;
+  const delId = action.dataset.del;
+  const dxId = action.dataset.dx;
+  const checkId = action.dataset.check;
   if (checkId) {
-    const button = ev.target;
+    const button = action;
     button.disabled = true;
     try {
       const result = await api(`/api/accounts/${checkId}/status`);
@@ -558,7 +470,7 @@ $("accounts").addEventListener("click", async (ev) => {
     }
   }
   if (runId) {
-    const btn = ev.target;
+    const btn = action;
     btn.disabled = true;
     btn.innerHTML = '<span class="spin"></span>';
     try {
@@ -570,7 +482,7 @@ $("accounts").addEventListener("click", async (ev) => {
       toast(e.message, true);
     } finally {
       btn.disabled = false;
-      btn.textContent = "签到";
+      btn.innerHTML = icon("check") + "签到";
     }
   }
   if (delId) {
@@ -694,6 +606,13 @@ document.addEventListener("keydown", event => {
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
     if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
   }
+});
+document.querySelectorAll(".nav-links a").forEach(link => {
+  link.addEventListener("click", () => {
+    document.querySelectorAll(".nav-links a").forEach(item => { item.classList.remove("active"); item.removeAttribute("aria-current"); });
+    link.classList.add("active");
+    link.setAttribute("aria-current", "location");
+  });
 });
 
 loadAll();

@@ -16,7 +16,7 @@ Longfor Auto Check-in 使用一个 Python Web 服务、一个 SQLite 数据库�
 | `app/db.py` | SQLite 访问、默认配置、字段迁移和业务日期 |
 | `app/notifications.py` | PushPlus / Webhook 协议适配与安全返回值 |
 | `app/captcha.py` | 可选实验求解器的进程边界；默认关闭 |
-| `app/static/index.html` | 同源管理页面，显示两个入口的结果 |
+| `app/static/index.html`、`app/static/styles.css` | 同源管理页面与样式，显示两个入口的结果；无需前端构建 |
 | `tools/manage.py` | 本地初始化及一致性备份，不参与签到执行 |
 
 `tools/official_login.*` 等辅助工具在使用者本机运行，与服务端签到进程分开。它们不应成为标准服务必须安装的依赖。
