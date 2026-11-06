@@ -16,7 +16,7 @@ Longfor Auto Check-in 使用一个 Python Web 服务、一个 SQLite 数据库�
 | `app/db.py` | SQLite 访问、默认配置、字段迁移和业务日期 |
 | `app/notifications.py` | PushPlus / Webhook 协议适配与安全返回值 |
 | `app/captcha.py` | 可选实验求解器的进程边界；默认关闭 |
-| `app/static/index.html`、`app/static/styles.css` | 同源管理页面与样式，显示两个入口的结果；无需前端构建 |
+| `app/static/index.html`、`app/static/styles.css`、`app/static/ui-state.js` | 同源页面、日夜主题和状态展示；无需前端构建 |
 | `tools/manage.py` | 本地初始化及一致性备份，不参与签到执行 |
 
 `tools/official_login.*` 等辅助工具在使用者本机运行，与服务端签到进程分开。它们不应成为标准服务必须安装的依赖。
@@ -51,6 +51,8 @@ flowchart TD
 图中省略了已暂停入口的分支：当天出现 `risk` 或 `todo` 后，下一轮只读复核该入口；确认已签则更新为已签，不能再提交。另一入口的失败不能解除这个保护。
 
 真正发出签到请求前，先将该入口的 `todo` 与业务时间持久化。若进程在提交附近中断，重启后会先只读复核，避免把缺失响应当作“从未提交”。这是单进程内的恢复保护，不代表跨多个实例的严格仅执行一次保证。
+
+账号 API 的 `is_busy` 是当前进程中账号互斥锁的只读快照。页面在处理期间显示蓝色“处理中”，避免将提交中的临时 `todo` 误报为人工问题；释放锁后按真实结果提示。它不写入数据库，也不改变签到状态。今日尚未执行的入口不使用昨日错误生成新告警；已有指纹只表示本地配置存在，不代表通过服务端验证。
 
 ## 状态合同
 

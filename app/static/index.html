@@ -5,6 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="app-root" content="__APP_ROOT__">
 <title>龙湖自动签到 · Longfor Auto Check-in</title>
+<script>
+(() => {
+  let theme;
+  try { theme = localStorage.getItem("longfor-theme"); } catch (_) { /* Storage may be unavailable. */ }
+  document.documentElement.dataset.theme = ["light", "dark"].includes(theme)
+    ? theme : (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+})();
+</script>
 <link rel="stylesheet" href="__APP_ROOT__/static/styles.css">
 </head>
 <body>
@@ -20,17 +28,19 @@
   <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5M6 6a8 8 0 0 1 13 2M5 16a8 8 0 0 0 13 2"/></symbol>
   <symbol id="i-device" viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10 18h4M10 6h4"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.4 1.4M17.6 17.6 19 19M5 19l1.4-1.4M17.6 6.4 19 5"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.5 13.2A8.5 8.5 0 0 1 10.8 3.5a8.5 8.5 0 1 0 9.7 9.7Z"/></symbol>
 </svg>
 <div class="sitebar"><div class="sitebar-inner">
   <a class="brand" href="#dashboard" aria-label="龙湖自动签到首页">
     <div class="brand-mark"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg></div>
     <span class="brand-name">龙湖自动签到</span>
   </a>
-  <nav class="nav-links" aria-label="主导航">
+  <div class="sitebar-tools"><nav class="nav-links" aria-label="主导航">
     <a href="#dashboard" class="active" aria-current="location" aria-label="总览">总览</a>
     <a href="#accountSection" aria-label="账号管理">账号</a>
     <a href="#activitySection" aria-label="执行记录">活动</a>
-  </nav>
+  </nav><button id="btnTheme" class="theme-toggle" type="button"><span id="themeIcon" aria-hidden="true"></span><span id="themeText">夜间</span></button></div>
 </div></div>
 <main class="wrap" id="dashboard">
   <header>
@@ -158,6 +168,7 @@
 
 <div id="toast" role="status" aria-live="polite"></div>
 
+<script src="__APP_ROOT__/static/ui-state.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const icon = (name) => `<svg class="icon" aria-hidden="true"><use href="#i-${name}"/></svg>`;
@@ -169,6 +180,28 @@ let businessToday = "";
 let appCheckinMode = "auto";
 let modalOpener = null;
 let hasLoaded = false;
+let scheduleContext = { scheduleEnabled: false, nextRun: "" };
+let manualTheme = false;
+try { manualTheme = ["light", "dark"].includes(localStorage.getItem("longfor-theme")); } catch (_) { /* Optional preference. */ }
+
+function applyTheme(theme, remember = false) {
+  document.documentElement.dataset.theme = theme;
+  const dark = theme === "dark";
+  $("themeIcon").innerHTML = icon(dark ? "sun" : "moon");
+  $("themeText").textContent = dark ? "日间" : "夜间";
+  const label = dark ? "切换为日间模式" : "切换为夜间模式";
+  $("btnTheme").setAttribute("aria-label", label);
+  $("btnTheme").title = label;
+  if (remember) {
+    manualTheme = true;
+    try { localStorage.setItem("longfor-theme", theme); } catch (_) { /* Switching still works without storage. */ }
+  }
+}
+applyTheme(document.documentElement.dataset.theme);
+$("btnTheme").onclick = () => applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark", true);
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", event => {
+  if (!manualTheme) applyTheme(event.matches ? "dark" : "light");
+});
 
 function openModal(id) {
   modalOpener = document.activeElement;
@@ -184,7 +217,7 @@ function closeModal(modal) {
 function toast(msg, isErr) {
   const el = $("toast");
   el.textContent = msg;
-  el.className = "show" + (isErr ? " err" : "");
+  el.className = "show" + (isErr === "warning" ? " warn" : isErr ? " err" : "");
   clearTimeout(el._t);
   el._t = setTimeout(() => { el.className = ""; }, 3200);
 }
@@ -207,52 +240,55 @@ function runResultSummary(result) {
     return { message: result.checkin_message || "账号已有任务进行中，请等待本轮结果", isErr: false };
   }
   const extra = Array.isArray(result.extra_signs) ? result.extra_signs : [];
-  const entries = [{ name: "小程序", status: result.checkin_status, message: result.checkin_message || result.error }, ...extra];
+  const entries = [{ key: "mini", name: "小程序", status: result.checkin_status, message: result.checkin_message || result.error }, ...extra];
   if (!extra.some((item) => item.key === "app")) {
-    entries.push({ name: "App", status: "todo", message: "未返回执行结果，请查看日志" });
+    entries.push({ key: "app", name: "App", status: "todo", message: "未返回执行结果，请查看日志" });
   }
-  const labels = { ok: "已签到", already: "今日已签", todo: "待确认", risk: "需要验证", fail: "失败", conflict: "指纹冲突", skipped: "已跳过", retry: "等待重试", busy: "执行中" };
-  const needsAttention = (entry) => ["todo", "risk", "fail", "conflict", "retry"].includes(entry.status) || !Object.hasOwn(labels, entry.status);
+  const states = entries.map(entry => ({ ...entry, display: CheckinUI.entryState(entry.status, entry.message, { key: entry.key, appMode: appCheckinMode, ...scheduleContext }) }));
   return {
-    message: entries.map((entry) => `${entry.name || "App"}：${labels[entry.status] || "状态未知"}${needsAttention(entry) && entry.message ? `（${entry.message}）` : ""}`).join("；"),
-    isErr: entries.some(needsAttention),
+    message: states.map(entry => `${entry.name || "App"}：${entry.display.label}${entry.display.attention ? `（${entry.display.attention.reason}）` : ""}`).join("；"),
+    isErr: states.some(entry => entry.display.tone === "danger") ? true : states.some(entry => entry.display.attention) ? "warning" : false,
   };
 }
 
-function statusBadge(acc) {
-  if (!acc.enabled) return ['b-pending', '已停用'];
+function accountContext(acc) {
+  return { ...scheduleContext, appMode: appCheckinMode, enabled: acc.enabled, hasDevice: Boolean(acc.has_dx), isBusy: Boolean(acc.is_busy) };
+}
+
+function statusBadge(acc, attention) {
+  if (!acc.enabled) return ['b-neutral', '已停用'];
+  if (acc.is_busy) return ['b-info', '处理中'];
+  if (attention.length) return [attention.some(item => item.tone === 'danger') ? 'b-fail' : 'b-warn', '需要处理'];
   const labels = {
     ok: ['b-ok', '今日完成'], already: ['b-already', '今日完成'],
-    partial: ['b-pending', '部分完成'], conflict: ['b-fail', '待处理'],
-    risk: ['b-fail', '需要验证'], fail: ['b-fail', '待处理'],
-    retry: ['b-pending', '等待重试'], busy: ['b-pending', '执行中'],
-    todo: ['b-pending', '待确认'],
+    partial: ['b-info', '部分完成'], retry: ['b-info', '稍后检查'],
+    busy: ['b-info', '执行中'], todo: ['b-warn', '待确认'],
   };
-  return labels[acc.today_status] || ['b-pending', '待执行'];
+  return labels[acc.today_status] || ['b-neutral', '待执行'];
 }
 
 function entryResult(acc, key) {
   const isApp = key === "app";
   const status = acc[isApp ? "app_today_status" : "mini_today_status"] || "pending";
-  const labels = { ok: "已签到", already: "今日已签", todo: "待确认", risk: "需要验证", fail: "失败", conflict: "指纹冲突", skipped: "已跳过", retry: "等待重试", busy: "执行中", pending: "待执行" };
-  const cls = ["ok", "already"].includes(status) ? "b-ok" : ["fail", "risk", "conflict"].includes(status) ? "b-fail" : "b-pending";
-  const message = status === "pending" ? "今日尚无执行结果" : status === "skipped" ? "已关闭 App 入口" : acc[isApp ? "app_last_message" : "last_message"] || "";
-  const showDetail = !["ok", "already"].includes(status);
-  return `<div class="entry-result"><div class="entry-line"><span class="name">${isApp ? "App" : "小程序"}</span><span class="badge ${cls}">${labels[status] || "状态未知"}</span></div>${showDetail ? `<div class="note">${escapeHtml(message)}</div>` : ""}</div>`;
+  const result = CheckinUI.entryState(status, acc[isApp ? "app_last_message" : "last_message"], { ...accountContext(acc), key });
+  return `<div class="entry-result"><div class="entry-line"><span class="name">${isApp ? "App" : "小程序"}</span><span class="badge ${result.className}">${escapeHtml(result.label)}</span></div>${result.info ? `<div class="note">${escapeHtml(result.info)}</div>` : ""}</div>`;
 }
 
 function renderOverview(o) {
-  const s = o.stats || {};
-  const total = Math.max(0, Number(o.total) || 0);
-  const done = (Number(s.ok) || 0) + (Number(s.already) || 0);
-  const pending = ["pending", "fail", "conflict", "risk", "retry", "busy"].reduce((count, key) => count + (Number(s[key]) || 0), 0);
+  const active = accounts.filter(account => account.enabled);
+  const total = active.length;
+  const done = active.filter(account => ["ok", "already"].includes(account.today_status)).length;
+  const notices = active.map(account => CheckinUI.accountAttention(account, accountContext(account)));
+  const needs = notices.filter(items => items.length).length;
+  const hasError = notices.some(items => items.some(item => item.tone === "danger"));
+  const pending = active.filter((account, index) => !["ok", "already"].includes(account.today_status) && !notices[index].length).length;
   const paused = o.schedule_enabled === false;
   const [nextDate, nextTime] = String(o.next_run || "").split(" ");
   $("todayDate").textContent = o.today ? new Date(o.today + "T12:00:00+08:00").toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "long", timeZone: "Asia/Shanghai" }) : "—";
   $("overview").innerHTML = `
     <div class="stat"><div class="label">${appCheckinMode === "off" ? "小程序完成" : "双端完成"}</div><div class="value">${done}<small>/ ${total}</small></div></div>
-    <div class="stat"><div class="label">部分完成</div><div class="value">${s.partial || 0}</div></div>
-    <div class="stat"><div class="label">待执行 / 待处理</div><div class="value ${s.fail || s.risk || s.conflict ? 'attention' : ''}">${pending}</div></div>
+    <div class="stat"><div class="label">需要你处理</div><div class="value ${needs ? 'attention' : ''} ${hasError ? 'tone-danger' : ''}">${needs}</div></div>
+    <div class="stat"><div class="label">等待执行 / 检查</div><div class="value">${pending}</div></div>
     <div class="stat schedule-stat"><div class="label">${paused ? "自动签到" : "下次执行 · 北京时间"}</div><div class="value schedule-time ${paused ? 'paused' : ''}">${paused ? "已暂停" : escapeHtml(nextTime || "—")}</div><div class="schedule-caption">${paused ? '<a href="https://github.com/knightHuo/longfor-auto-checkin#快速开始" target="_blank" rel="noopener noreferrer">了解如何开启 ↗</a>' : escapeHtml(nextDate || "等待排程")}</div></div>
   `;
 }
@@ -266,20 +302,18 @@ function renderAccounts() {
     return;
   }
   $("accounts").innerHTML = accounts.map((a) => {
-    const [cls, label] = statusBadge(a);
+    const attention = CheckinUI.accountAttention(a, accountContext(a));
+    const [cls, label] = statusBadge(a, attention);
+    const device = CheckinUI.deviceState(a);
+    const tone = attention.some(item => item.tone === 'danger') ? 'danger' : 'warning';
     const days = a.days_left === null || a.days_left === undefined ? null : a.days_left;
     const dayText = days === null ? "未知" : `剩 ${days} 天`;
-    const sharedWith = (a.dx_shared_with || []).join("、");
-    const dxLabel = !a.has_dx ? "待补" : a.dx_conflict ? "与他人共用" : a.dx_shared ? "已配置（被共用）" : "已配置";
-    const dxColor = !a.has_dx ? "var(--amber)" : a.dx_conflict ? "var(--red)" : "var(--dim)";
-    const dxTitle = sharedWith ? `与「${sharedWith}」使用同一指纹，会触发风控` : "";
     return `
-    <div class="card" data-id="${a.id}">
+    <div class="card ${attention.length ? `needs-attention tone-${tone}` : ''}" data-id="${a.id}">
       <div class="card-head">
         <div class="card-identity"><div>
           <div class="card-name">${escapeHtml(a.name)}</div>
-          <div class="card-sub"><span style="color:${dxColor}" title="${escapeHtml(dxTitle)}">设备${dxLabel}${a.has_dx ? ` · ${escapeHtml(a.dx_source_label || "来源待确认")}` : ""}</span></div>
-          ${a.dx_conflict ? `<div style="margin-top:6px;font-size:12px;color:var(--red)">已暂停签到：与「${escapeHtml(sharedWith)}」共用指纹，请从本人独立设备环境重新采集</div>` : ""}
+          <div class="card-sub"><span class="device-state ${device.className}">${escapeHtml(device.label)}</span></div>
         </div></div>
         <span class="badge ${cls}">${label}</span>
       </div>
@@ -289,10 +323,11 @@ function renderAccounts() {
         <div class="metric"><div class="k">珑珠</div><div class="v gold">${a.balance ?? 0}</div></div>
       </div>
       <div class="entry-results">${entryResult(a, "mini")}${entryResult(a, "app")}</div>
+      ${attention.length ? `<div class="attention-box" aria-label="需要处理">${attention.map(item => `<div class="attention-item tone-${item.tone}"><div class="attention-title">${escapeHtml(item.title)}</div><p class="attention-reason">${escapeHtml(item.reason)}</p><p class="attention-next">${escapeHtml(item.next)}</p><button type="button" class="attention-action" data-${item.action}="${a.id}">${escapeHtml(item.actionLabel)}</button></div>`).join('')}</div>` : ''}
       <div class="session-note"><span>登录有效期（估算）</span><span>${dayText}</span></div>
       <div class="card-foot">
-        <button class="small" data-check="${a.id}" title="只查询官方状态，不续期或提交签到">${icon("refresh")}核对状态</button>
-        <button class="small" data-dx="${a.id}">${icon("device")}${a.has_dx ? "设备" : "补设备"}</button>
+        ${attention.some(item => item.action === 'check') ? '' : `<button class="small" data-check="${a.id}" title="只查询官方状态，不续期或提交签到">${icon("refresh")}核对状态</button>`}
+        ${attention.some(item => item.action === 'dx') ? '' : `<button class="small" data-dx="${a.id}">${icon("device")}指纹</button>`}
         <button class="small" data-run="${a.id}">${icon("check")}签到</button>
         <button class="small danger" data-del="${a.id}">${icon("trash")}删除</button>
       </div>
@@ -334,8 +369,9 @@ async function loadAll() {
     ]);
     businessToday = overview.today || "";
     appCheckinMode = overview.app_checkin_mode || "auto";
-    renderOverview(overview);
+    scheduleContext = { scheduleEnabled: overview.schedule_enabled === true, nextRun: overview.next_run || "" };
     accounts = accs;
+    renderOverview(overview);
     renderAccounts();
     renderLogs(logs);
     hasLoaded = true;
@@ -351,13 +387,23 @@ async function loadAll() {
 $("btnRetry").onclick = loadAll;
 
 // ---- 交互 ----
-$("btnAdd").onclick = () => {
+function updateAccountDialogLabels() {
+  const updating = Boolean($("accTarget").value);
+  $("modalAdd").querySelector("h3").textContent = updating ? "更新登录" : "添加账号";
+  $("modalAdd").querySelector('[role="dialog"]').setAttribute("aria-label", updating ? "更新账号登录" : "添加账号");
+  $("btnSubmitAdd").textContent = updating ? "校验并更新" : "校验并添加";
+}
+$("accTarget").onchange = updateAccountDialogLabels;
+function openAccountDialog(accountId = "") {
   $("accTarget").innerHTML = '<option value="">添加新账号</option>' + accounts.map(account => `<option value="${account.id}">更新登录：${escapeHtml(account.name)}</option>`).join("");
+  $("accTarget").value = String(accountId);
   $("accName").value = "";
   $("accPayload").value = "";
   $("accFile").value = "";
+  updateAccountDialogLabels();
   openModal("modalAdd");
-};
+}
+$("btnAdd").onclick = () => openAccountDialog();
 $("btnCancelAdd").onclick = () => closeModal($("modalAdd"));
 
 document.querySelectorAll(".tabs button").forEach((btn) => {
@@ -402,7 +448,7 @@ $("btnSubmitAdd").onclick = async () => {
     toast(e.message, true);
   } finally {
     btn.disabled = false;
-    btn.textContent = "校验并添加";
+    btn.textContent = $("accTarget").value ? "校验并更新" : "校验并添加";
   }
 };
 
@@ -413,6 +459,7 @@ $("accounts").addEventListener("click", async (ev) => {
   const delId = action.dataset.del;
   const dxId = action.dataset.dx;
   const checkId = action.dataset.check;
+  if (action.dataset.login) return openAccountDialog(action.dataset.login);
   if (checkId) {
     const button = action;
     button.disabled = true;

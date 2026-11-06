@@ -120,6 +120,8 @@ def _decorate(account: dict, usage: dict[str, list[dict]] | None = None,
     item["dx_shared_with"] = [a["name"] for a in shared]
     item["dx_conflict"] = any(a["id"] < account["id"] for a in shared)
     item["days_left"] = runner.days_left(account.get("expire_at"))
+    account_id = account.get("id")
+    item["is_busy"] = run_guard.is_busy(account_id) if account_id is not None else False
     item.update(_daily_status(account, today or db.business_date(), app_mode))
     return item
 
