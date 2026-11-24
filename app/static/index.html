@@ -174,6 +174,12 @@ const $ = (id) => document.getElementById(id);
 const icon = (name) => `<svg class="icon" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const API_BASE = document.querySelector('meta[name="app-root"]').content.replace(/\/$/, "");
 let accounts = [];
+let lastOverview = null;
+const liveChecks = new Map();
+const pendingChecks = new Set();
+const checkSeq = new Map();
+let nextCheckToken = 0;
+let loadSeq = 0;
 let bindMode = "curl";
 let pushplusConfigured = false;
 let businessToday = "";
@@ -251,8 +257,15 @@ function runResultSummary(result) {
   };
 }
 
-function accountContext(acc) {
-  return { ...scheduleContext, appMode: appCheckinMode, enabled: acc.enabled, hasDevice: Boolean(acc.has_dx), isBusy: Boolean(acc.is_busy) };
+function activeLiveCheck(acc) {
+  const key = String(acc.id);
+  const resolved = CheckinUI.resolveLiveCheck(acc, liveChecks.get(key), businessToday);
+  if (!resolved) liveChecks.delete(key);
+  return resolved;
+}
+
+function accountContext(acc, liveCheck = activeLiveCheck(acc)) {
+  return { ...scheduleContext, appMode: appCheckinMode, enabled: acc.enabled, hasDevice: Boolean(acc.has_dx), isBusy: Boolean(acc.is_busy), liveCheck };
 }
 
 function statusBadge(acc, attention) {
@@ -267,21 +280,38 @@ function statusBadge(acc, attention) {
   return labels[acc.today_status] || ['b-neutral', '待执行'];
 }
 
-function entryResult(acc, key) {
+function entryResult(acc, key, liveCheck = activeLiveCheck(acc)) {
   const isApp = key === "app";
   const status = acc[isApp ? "app_today_status" : "mini_today_status"] || "pending";
-  const result = CheckinUI.entryState(status, acc[isApp ? "app_last_message" : "last_message"], { ...accountContext(acc), key });
+  const runAt = acc[isApp ? "app_last_run_at" : "last_run_at"];
+  const rawEntry = liveCheck ? liveCheck[key] : null;
+  const entryLive = (rawEntry || (liveCheck && liveCheck.authExpired))
+    ? {
+      status: rawEntry ? rawEntry.status : "",
+      checkedAt: (rawEntry && rawEntry.checkedAt) || (liveCheck && liveCheck.checkedAt) || "",
+      lastRunAt: runAt,
+      authExpired: Boolean(liveCheck && liveCheck.authExpired),
+      authMessage: (liveCheck && liveCheck.authMessage) || "",
+    }
+    : null;
+  const result = CheckinUI.entryState(status, acc[isApp ? "app_last_message" : "last_message"], { ...accountContext(acc, liveCheck), key, liveCheck: entryLive });
   return `<div class="entry-result"><div class="entry-line"><span class="name">${isApp ? "App" : "小程序"}</span><span class="badge ${result.className}">${escapeHtml(result.label)}</span></div>${result.info ? `<div class="note">${escapeHtml(result.info)}</div>` : ""}</div>`;
 }
 
 function renderOverview(o) {
-  const active = accounts.filter(account => account.enabled);
+  lastOverview = o;
+  const active = accounts.filter(account => account.enabled).map(account => {
+    const live = activeLiveCheck(account);
+    const ctx = accountContext(account, live);
+    const view = CheckinUI.effectiveAccount(account, live, ctx);
+    const attention = CheckinUI.accountAttention(view, accountContext(view, live));
+    return { view, attention };
+  });
   const total = active.length;
-  const done = active.filter(account => ["ok", "already"].includes(account.today_status)).length;
-  const notices = active.map(account => CheckinUI.accountAttention(account, accountContext(account)));
-  const needs = notices.filter(items => items.length).length;
-  const hasError = notices.some(items => items.some(item => item.tone === "danger"));
-  const pending = active.filter((account, index) => !["ok", "already"].includes(account.today_status) && !notices[index].length).length;
+  const done = active.filter(({ view, attention }) => !attention.length && ["ok", "already"].includes(view.today_status)).length;
+  const needs = active.filter(({ attention }) => attention.length).length;
+  const hasError = active.some(({ attention }) => attention.some(item => item.tone === "danger"));
+  const pending = active.filter(({ view, attention }) => !attention.length && !["ok", "already"].includes(view.today_status)).length;
   const paused = o.schedule_enabled === false;
   const [nextDate, nextTime] = String(o.next_run || "").split(" ");
   $("todayDate").textContent = o.today ? new Date(o.today + "T12:00:00+08:00").toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "long", timeZone: "Asia/Shanghai" }) : "—";
@@ -301,10 +331,13 @@ function renderAccounts() {
     </div>`;
     return;
   }
-  $("accounts").innerHTML = accounts.map((a) => {
-    const attention = CheckinUI.accountAttention(a, accountContext(a));
+  $("accounts").innerHTML = accounts.map((rawAccount) => {
+    const live = activeLiveCheck(rawAccount);
+    const a = CheckinUI.effectiveAccount(rawAccount, live, accountContext(rawAccount, live));
+    const attention = CheckinUI.accountAttention(a, accountContext(a, live));
     const [cls, label] = statusBadge(a, attention);
     const device = CheckinUI.deviceState(a);
+    const checking = pendingChecks.has(String(a.id));
     const tone = attention.some(item => item.tone === 'danger') ? 'danger' : 'warning';
     const days = a.days_left === null || a.days_left === undefined ? null : a.days_left;
     const dayText = days === null ? "未知" : `剩 ${days} 天`;
@@ -322,11 +355,11 @@ function renderAccounts() {
         <div class="metric"><div class="k">等级</div><div class="v">${escapeHtml(a.level_name || "—")}</div></div>
         <div class="metric"><div class="k">珑珠</div><div class="v gold">${a.balance ?? 0}</div></div>
       </div>
-      <div class="entry-results">${entryResult(a, "mini")}${entryResult(a, "app")}</div>
-      ${attention.length ? `<div class="attention-box" aria-label="需要处理">${attention.map(item => `<div class="attention-item tone-${item.tone}"><div class="attention-title">${escapeHtml(item.title)}</div><p class="attention-reason">${escapeHtml(item.reason)}</p><p class="attention-next">${escapeHtml(item.next)}</p><button type="button" class="attention-action" data-${item.action}="${a.id}">${escapeHtml(item.actionLabel)}</button></div>`).join('')}</div>` : ''}
+      <div class="entry-results">${entryResult(a, "mini", live)}${entryResult(a, "app", live)}</div>
+      ${attention.length ? `<div class="attention-box" aria-label="需要处理">${attention.map(item => `<div class="attention-item tone-${item.tone}"><div class="attention-title">${escapeHtml(item.title)}</div><p class="attention-reason">${escapeHtml(item.reason)}</p><p class="attention-next">${escapeHtml(item.next)}</p><button type="button" class="attention-action" data-${item.action}="${a.id}" ${item.action === 'check' && checking ? 'disabled' : ''}>${escapeHtml(item.actionLabel)}</button></div>`).join('')}</div>` : ''}
       <div class="session-note"><span>登录有效期（估算）</span><span>${dayText}</span></div>
       <div class="card-foot">
-        ${attention.some(item => item.action === 'check') ? '' : `<button class="small" data-check="${a.id}" title="只查询官方状态，不续期或提交签到">${icon("refresh")}核对状态</button>`}
+        ${attention.some(item => item.action === 'check') ? '' : `<button class="small" data-check="${a.id}" ${checking ? 'disabled' : ''} title="只查询官方状态，不续期或提交签到">${icon("refresh")}核对状态</button>`}
         ${attention.some(item => item.action === 'dx') ? '' : `<button class="small" data-dx="${a.id}">${icon("device")}指纹</button>`}
         <button class="small" data-run="${a.id}">${icon("check")}签到</button>
         <button class="small danger" data-del="${a.id}">${icon("trash")}删除</button>
@@ -362,12 +395,17 @@ function escapeHtml(s) {
 }
 
 async function loadAll() {
+  const seq = ++loadSeq;
   $("btnRetry").disabled = true;
   try {
     const [overview, accs, logs] = await Promise.all([
       api("/api/overview"), api("/api/accounts"), api("/api/logs?limit=40"),
     ]);
-    businessToday = overview.today || "";
+    if (seq !== loadSeq) return;
+    const overviewDay = overview.today || "";
+    if (!businessToday || (overviewDay && overviewDay >= businessToday)) {
+      businessToday = overviewDay;
+    }
     appCheckinMode = overview.app_checkin_mode || "auto";
     scheduleContext = { scheduleEnabled: overview.schedule_enabled === true, nextRun: overview.next_run || "" };
     accounts = accs;
@@ -377,11 +415,12 @@ async function loadAll() {
     hasLoaded = true;
     $("loadError").hidden = true;
   } catch (e) {
+    if (seq !== loadSeq) return;
     $("loadError").hidden = false;
     $("loadErrorMessage").textContent = (hasLoaded ? "当前可能是上次的记录。" : "") + e.message;
     if (!hasLoaded) $("overview").innerHTML = "";
   } finally {
-    $("btnRetry").disabled = false;
+    if (seq === loadSeq) $("btnRetry").disabled = false;
   }
 }
 $("btnRetry").onclick = loadAll;
@@ -441,6 +480,11 @@ $("btnSubmitAdd").onclick = async () => {
   btn.innerHTML = '<span class="spin"></span>校验中';
   try {
     const res = await api("/api/accounts/bind", { method: "POST", body: fd });
+    if (res && res.id !== undefined) {
+      checkSeq.set(String(res.id), ++nextCheckToken);
+      pendingChecks.delete(String(res.id));
+      liveChecks.delete(String(res.id));
+    }
     closeModal($("modalAdd"));
     toast(`${res.updated ? "已更新登录" : "已添加"}：${res.name}`);
     await loadAll();
@@ -461,15 +505,48 @@ $("accounts").addEventListener("click", async (ev) => {
   const checkId = action.dataset.check;
   if (action.dataset.login) return openAccountDialog(action.dataset.login);
   if (checkId) {
-    const button = action;
-    button.disabled = true;
+    const key = String(checkId);
+    if (pendingChecks.has(key)) return;
+    const token = ++nextCheckToken;
+    checkSeq.set(key, token);
+    pendingChecks.add(key);
+    renderAccounts();
     try {
       const result = await api(`/api/accounts/${checkId}/status`);
+      if (checkSeq.get(key) !== token) return;
+      const resultDay = result.today || businessToday;
+      const entryDates = result.entry_dates && typeof result.entry_dates === "object" ? result.entry_dates : {};
+      const entryCheckedAt = result.entry_checked_at && typeof result.entry_checked_at === "object" ? result.entry_checked_at : {};
+      const authErrorLine = (Array.isArray(result.errors) ? result.errors : []).find((line) => /鉴权失败|登录已失效|登录已过期|未登录|801001/.test(String(line || ""))) || "";
+      const authExpired = Boolean(result.auth_expired) || Boolean(authErrorLine);
+      const dayAdvanced = Boolean(resultDay && businessToday && resultDay > businessToday);
+      if (dayAdvanced) businessToday = resultDay;
+      liveChecks.set(key, {
+        today: resultDay,
+        checkedAt: entryCheckedAt.mini || entryCheckedAt.app || result.checked_at || "",
+        authExpired,
+        authMessage: authErrorLine,
+        mini: { status: result.mini, today: entryDates.mini || resultDay, checkedAt: entryCheckedAt.mini || result.checked_at || "" },
+        app: { status: result.app, today: entryDates.app || resultDay, checkedAt: entryCheckedAt.app || result.checked_at || "" },
+        profile: result.profile || {},
+      });
       const labels = { signed: "今日已签", not_signed: "今日未签", unknown: "暂时无法确认" };
       const message = `只读核对：小程序${labels[result.mini] || labels.unknown}；App ${labels[result.app] || labels.unknown}`;
       toast(message + (result.errors?.length ? "。" + result.errors.join("；") : ""), Boolean(result.errors?.length));
-    } catch (error) { toast(error.message, true); }
-    finally { button.disabled = false; }
+      pendingChecks.delete(key);
+      if (dayAdvanced) {
+        await loadAll();
+      } else {
+        if (lastOverview) renderOverview(lastOverview);
+        renderAccounts();
+      }
+    } catch (error) {
+      if (checkSeq.get(key) === token) toast(error.message, true);
+    } finally {
+      if (checkSeq.get(key) === token && pendingChecks.delete(key)) {
+        renderAccounts();
+      }
+    }
   }
   if (dxId) {
     const value = prompt(
@@ -489,6 +566,9 @@ $("accounts").addEventListener("click", async (ev) => {
       fd.append("dx_token", value.trim());
       if (value.trim()) fd.append("dx_source", sourceValues[sourceLabel.trim()]);
       await api(`/api/accounts/${dxId}/dx`, { method: "POST", body: fd });
+      checkSeq.set(String(dxId), ++nextCheckToken);
+      pendingChecks.delete(String(dxId));
+      liveChecks.delete(String(dxId));
       toast(value.trim() ? "设备指纹已保存" : "已清除");
       await loadAll();
     } catch (e) {
@@ -501,6 +581,9 @@ $("accounts").addEventListener("click", async (ev) => {
     btn.innerHTML = '<span class="spin"></span>';
     try {
       const r = await api(`/api/accounts/${runId}/run`, { method: "POST" });
+      checkSeq.set(String(runId), ++nextCheckToken);
+      pendingChecks.delete(String(runId));
+      liveChecks.delete(String(runId));
       const summary = runResultSummary(r);
       toast(summary.message, summary.isErr);
       await loadAll();

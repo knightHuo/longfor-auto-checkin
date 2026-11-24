@@ -33,6 +33,7 @@ DEFAULT_JITTER = 60
 MAX_RETRY = 4
 RETRY_MINUTES = 10
 RETRYABLE_STATUSES = frozenset(("fail", "retry", "busy"))
+ATTENTION_STATUSES = frozenset(("risk", "todo", "conflict"))
 CATCHUP_SECONDS = 30
 
 scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
@@ -133,10 +134,19 @@ def _catchup_time(now: datetime) -> datetime:
     return min(now + timedelta(seconds=CATCHUP_SECONDS), midnight - timedelta(microseconds=1))
 
 
-def _record_result(ok_all: bool, run_date: str | None = None):
-    """记录本轮结果。全成功 → 记为今天已跑；有失败 → 排当天重试。"""
+def _record_result(ok_all: bool, run_date: str | None = None) -> str:
+    """持久化本轮重试或结算决定，并返回决定供调度日志使用。"""
     now = _now()
     run_date = run_date or now.date().isoformat()
+    finished = {"last_run_date": run_date, "retry_at": "", "retry_count": "0", "retry_date": ""}
+    if ok_all or now.date().isoformat() != run_date:
+        # 跨午夜完成只结算启动那天，不能把新一天误记为已完成或沿用旧重试次数。
+        db.save_settings(finished)
+        if ok_all:
+            return "settled"
+        logger.warning("任务跨午夜完成，结束 %s 的重试，次日按正常排程执行", run_date)
+        return "midnight"
+
     settings = db.get_settings()
     retry_at = _parse_iso(settings.get("retry_at"))
     retry_date = settings.get("retry_date") or (retry_at.date().isoformat() if retry_at else "")
@@ -145,28 +155,24 @@ def _record_result(ok_all: bool, run_date: str | None = None):
     except (TypeError, ValueError):
         retries = 0
 
-    finished = {"last_run_date": run_date, "retry_at": "", "retry_count": "0", "retry_date": ""}
-    if ok_all or now.date().isoformat() != run_date:
-        # 跨午夜完成只结算启动那天，不能把新一天误记为已完成或沿用旧重试次数。
-        db.save_settings(finished)
-        return
-
     if retries < MAX_RETRY:
         delay = RETRY_MINUTES * (retries + 1)
         when = now + timedelta(minutes=delay)
         if when.date() != now.date():
             db.save_settings(finished)
             logger.warning("重试时间将跨午夜，结束 %s 的重试，次日按正常排程执行", run_date)
-            return
+            return "midnight"
         db.save_settings({"retry_at": when.isoformat(), "retry_count": str(retries + 1),
                           "retry_date": run_date})
         logger.warning(
-            "本轮有账号失败，%d 分钟后重试（第 %d/%d 次）：%s",
+            "重试已记录，间隔 %d 分钟（第 %d/%d 次），预计 %s",
             delay, retries + 1, MAX_RETRY, when.strftime("%H:%M:%S"),
         )
-    else:
-        db.save_settings(finished)
-        logger.error("已重试 %d 次仍失败，今天不再重试", MAX_RETRY)
+        return "retry"
+
+    db.save_settings(finished)
+    logger.error("已重试 %d 次仍失败，今天不再重试", MAX_RETRY)
+    return "exhausted"
 
 
 def _job():
@@ -176,29 +182,39 @@ def _job():
             return
         _running = True
         run_date = _today_text()
-    ok_all = True
     results = []
+    retry_count = None
+    decision = None
+    next_run = None
     try:
         logger.info("定时任务开始执行")
         results = runner.run_all()
-        failed = [r for r in results if _needs_retry(r)]
-        ok_all = not failed
-        logger.info("定时任务完成，共 %d 个账号，失败 %d 个", len(results), len(failed))
+        retry_count = sum(_needs_retry(r) for r in results)
     except Exception:
         logger.exception("定时任务执行失败")
-        ok_all = False
     finally:
         with _state_lock:
             try:
-                _record_result(ok_all, run_date)
+                decision = _record_result(retry_count == 0, run_date)
             except Exception:
                 logger.exception("记录执行结果失败")
             finally:
                 _running = False
             try:
-                _ensure_scheduled(force=True)
+                next_run = _ensure_scheduled(force=True)
             except Exception:
                 logger.exception("重排签到任务失败，等待巡场恢复")
+    if retry_count is not None:
+        retry_today = next_run is not None and next_run.date().isoformat() == run_date
+        queued = decision == "retry" and retry_today
+        settled = decision in ("midnight", "exhausted") or (
+            decision == "retry" and next_run is not None and not retry_today
+        )
+        attention_count = sum(_needs_attention(r) or (settled and _needs_retry(r)) for r in results)
+        logger.info(
+            "定时任务完成，共 %d 个账号，可重试 %d 个，已排重试 %d 个，需人工处理 %d 个",
+            len(results), 0 if settled else retry_count, retry_count if queued else 0, attention_count,
+        )
     # 通知故障不能更改已落库的任务结果或把成功签到变成重试。
     try:
         runner.daily_summary(results)
@@ -209,6 +225,12 @@ def _job():
 def _needs_retry(result: dict) -> bool:
     return result.get("checkin_status") in RETRYABLE_STATUSES or any(
         entry.get("status") in RETRYABLE_STATUSES for entry in result.get("extra_signs") or []
+    )
+
+
+def _needs_attention(result: dict) -> bool:
+    return result.get("checkin_status") in ATTENTION_STATUSES or any(
+        entry.get("status") in ATTENTION_STATUSES for entry in result.get("extra_signs") or []
     )
 
 

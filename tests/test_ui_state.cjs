@@ -177,3 +177,174 @@ test('disabled accounts stay quiet even when credentials or device data need att
   assert.deepEqual(ui.accountAttention(account({ has_dx: false }), context({ enabled: false })), []);
   assert.equal(ui.entryState('risk', '需要验证', context({ enabled: false })).attention, null);
 });
+
+test('readonly live check updates signed cards while preserving earlier verification context', () => {
+  const raw = account({
+    today_status: 'risk',
+    mini_today_status: 'risk',
+    last_message: '签到失败：需要人机验证（code=8040012）',
+    last_run_at: '2026-11-24T08:15:56+08:00',
+    app_today_status: 'risk',
+    app_last_message: 'APP 签到失败：需要人机验证（code=8040012）',
+    app_last_run_at: '2026-11-24T08:15:59+08:00',
+    growth_value: 100,
+    balance: 10,
+  });
+  const partialLive = { mini: 'not_signed', app: 'signed', checkedAt: '2026-11-24T09:08:15+08:00', profile: { growth_value: 105, balance: 11 } };
+  const partialView = ui.effectiveAccount(raw, partialLive, context());
+  assert.equal(partialView.today_status, 'partial');
+  assert.equal(partialView.growth_value, 105);
+  assert.equal(raw.growth_value, 100);
+  const partialAlerts = ui.accountAttention(partialView, context({ liveCheck: partialLive }));
+  assert.equal(partialAlerts.length, 1);
+  assert.equal(partialAlerts[0].title, '小程序需要验证');
+  const appAfterPartial = ui.entryState('risk', raw.app_last_message, context({
+    key: 'app',
+    liveCheck: { status: 'signed', checkedAt: partialLive.checkedAt, lastRunAt: raw.app_last_run_at },
+  }));
+  assert.equal(appAfterPartial.label, '今日已签');
+  assert.equal(appAfterPartial.tone, 'success');
+  assert.match(appAfterPartial.info, /官方 09:08 核对已签/);
+  assert.match(appAfterPartial.info, /08:15 自动提交遇到验证/);
+  const miniAfterPartial = ui.entryState('risk', raw.last_message, context({
+    key: 'mini',
+    liveCheck: { status: 'not_signed', checkedAt: partialLive.checkedAt, lastRunAt: raw.last_run_at },
+  }));
+  assert.equal(miniAfterPartial.label, '需要验证');
+  assert.match(miniAfterPartial.info, /官方 09:08 核对未签/);
+
+  const bothLive = { mini: 'signed', app: 'signed', checkedAt: '2026-11-24T09:15:00+08:00' };
+  const doneView = ui.effectiveAccount(raw, bothLive, context());
+  assert.equal(doneView.today_status, 'already');
+  assert.deepEqual(ui.accountAttention(doneView, context({ liveCheck: bothLive })), []);
+});
+
+test('readonly live check never hides definite expired-login or device conflict alerts', () => {
+  const expired = ui.entryState('todo', '鉴权失败：登录已失效', context({
+    liveCheck: { status: 'signed', checkedAt: '2026-11-24T09:15:00+08:00' },
+  }));
+  assert.equal(expired.label, '登录失效');
+  assert.equal(expired.attention.action, 'login');
+  const conflict = ui.entryState('conflict', '指纹冲突', context({
+    liveCheck: { status: 'signed', checkedAt: '2026-11-24T09:15:00+08:00' },
+  }));
+  assert.equal(conflict.label, '指纹冲突');
+  assert.equal(conflict.attention.action, 'dx');
+  const expiredAccount = account({
+    today_status: 'todo',
+    mini_today_status: 'todo',
+    last_message: '鉴权失败：登录已失效',
+    app_today_status: 'already',
+  });
+  const live = { mini: 'signed', app: 'signed', checkedAt: '2026-11-24T09:15:00+08:00' };
+  const expiredView = ui.effectiveAccount(expiredAccount, live, context());
+  assert.notEqual(expiredView.today_status, 'ok');
+  assert.notEqual(expiredView.today_status, 'already');
+  assert.equal(ui.accountAttention(expiredView, context({ liveCheck: live }))[0].action, 'login');
+});
+
+test('readonly live check handles skipped-to-auto switch, halted risk wording, and signed-vs-not_signed conflict', () => {
+  const halted = ui.entryState('risk', 'APP 已暂停提交：本轮前序入口触发人机验证/风控，未继续提交', context({
+    key: 'app',
+    liveCheck: { status: 'signed', checkedAt: '2026-11-24T09:15:00+08:00', lastRunAt: '2026-11-24T08:15:59+08:00' },
+  }));
+  assert.equal(halted.label, '今日已签');
+  assert.match(halted.info, /因前序验证暂停提交/);
+  assert.doesNotMatch(halted.info, /自动提交遇到验证/);
+
+  const skippedBackToAuto = account({
+    today_status: 'partial',
+    mini_today_status: 'ok',
+    app_today_status: 'skipped',
+  });
+  const liveSigned = { mini: 'signed', app: 'signed', checkedAt: '2026-11-24T09:16:00+08:00' };
+  const viewSigned = ui.effectiveAccount(skippedBackToAuto, liveSigned, context({ appMode: 'auto' }));
+  assert.equal(viewSigned.today_status, 'ok');
+  assert.equal(ui.entryState('skipped', '', context({ key: 'app', appMode: 'auto', liveCheck: { status: 'signed', checkedAt: liveSigned.checkedAt } })).label, '今日已签');
+
+  const liveNotSigned = { mini: 'signed', app: 'not_signed', checkedAt: '2026-11-24T09:16:00+08:00' };
+  const appNotSigned = ui.entryState('skipped', '', context({ key: 'app', appMode: 'auto', liveCheck: { status: 'not_signed', checkedAt: liveNotSigned.checkedAt } }));
+  assert.equal(appNotSigned.label, '待执行');
+  assert.match(appNotSigned.info, /官方 09:16 核对未签/);
+
+  const mismatchAccount = account({ today_status: 'ok', mini_today_status: 'ok', app_today_status: 'already' });
+  const mismatchLive = { mini: 'not_signed', app: 'signed', checkedAt: '2026-11-24T09:17:00+08:00' };
+  const mismatchEntry = ui.entryState('ok', '签到成功', context({ key: 'mini', liveCheck: { status: 'not_signed', checkedAt: mismatchLive.checkedAt } }));
+  assert.equal(mismatchEntry.label, '待确认');
+  assert.match(mismatchEntry.info, /官方 09:17 核对未签/);
+  assert.equal(mismatchEntry.attention.action, 'check');
+  const mismatchView = ui.effectiveAccount(mismatchAccount, mismatchLive, context());
+  assert.equal(mismatchView.today_status, 'partial');
+  assert.equal(ui.accountAttention(mismatchView, context({ liveCheck: mismatchLive })).length, 1);
+});
+
+test('resolveLiveCheck handles per-entry expiration, same-second runs, and midnight rollover', () => {
+  const acc = account({
+    last_run_at: '2026-11-24T09:15:30+08:00',
+    app_last_run_at: '2026-11-24T08:15:59+08:00',
+  });
+  const check = {
+    today: '2026-11-24',
+    checkedAt: '2026-11-24T09:15:30+08:00',
+    mini: { status: 'signed', today: '2026-11-24', checkedAt: '2026-11-24T09:15:30+08:00' },
+    app: { status: 'signed', today: '2026-11-24', checkedAt: '2026-11-24T09:15:30+08:00' },
+    profile: { balance: 99 },
+  };
+  const partial = ui.resolveLiveCheck(acc, check, '2026-11-24');
+  assert.equal(partial.mini, null);
+  assert.equal(partial.app.status, 'signed');
+  assert.deepEqual(partial.profile, {});
+
+  const crossDay = {
+    today: '2026-11-25',
+    checkedAt: '2026-11-25T00:00:02.100+08:00',
+    mini: { status: 'signed', today: '2026-11-24', checkedAt: '2026-11-24T23:59:59.900+08:00' },
+    app: { status: 'not_signed', today: '2026-11-25', checkedAt: '2026-11-25T00:00:02.100+08:00' },
+  };
+  const keptBeforePoll = ui.resolveLiveCheck(account({ last_run_at: '2026-11-24T08:15:00+08:00', app_last_run_at: '2026-11-24T08:15:00+08:00' }), crossDay, '2026-11-24');
+  assert.equal(keptBeforePoll.mini.status, 'signed');
+  assert.equal(keptBeforePoll.app.status, 'not_signed');
+
+  const afterRollover = ui.resolveLiveCheck(account({ last_run_at: '2026-11-24T08:15:00+08:00', app_last_run_at: '2026-11-24T08:15:00+08:00' }), crossDay, '2026-11-25');
+  assert.equal(afterRollover.mini, null);
+  assert.equal(afterRollover.app.status, 'not_signed');
+
+  // Millisecond checkedAt (.450) must still treat a same-second DB run (.000) as superseding.
+  const sameSecondCheck = {
+    today: '2026-11-24',
+    checkedAt: '2026-11-24T09:15:30.450+08:00',
+    mini: { status: 'not_signed', today: '2026-11-24', checkedAt: '2026-11-24T09:15:30.120+08:00' },
+    app: { status: 'signed', today: '2026-11-24', checkedAt: '2026-11-24T09:15:31.200+08:00' },
+  };
+  const sameSecResolved = ui.resolveLiveCheck(account({
+    last_run_at: '2026-11-24T09:15:30+08:00',
+    app_last_run_at: '2026-11-24T08:15:59+08:00',
+  }), sameSecondCheck, '2026-11-24');
+  assert.equal(sameSecResolved.mini, null);
+  assert.equal(sameSecResolved.app.status, 'signed');
+});
+
+test('readonly authExpired overrides completed cards and skipped app under auto shows pending without live check', () => {
+  const signedAcc = account({ today_status: 'ok', mini_today_status: 'ok', app_today_status: 'already' });
+  const expiredLive = {
+    today: '2026-11-24',
+    checkedAt: '2026-11-24T09:20:00.123+08:00',
+    authExpired: true,
+    authMessage: '鉴权失败：登录已失效，请重新导入本人登录凭据',
+    mini: { status: 'unknown', today: '2026-11-24', checkedAt: '2026-11-24T09:20:00.100+08:00' },
+    app: { status: 'unknown', today: '2026-11-24', checkedAt: '2026-11-24T09:20:00.110+08:00' },
+  };
+  const resolved = ui.resolveLiveCheck(signedAcc, expiredLive, '2026-11-24');
+  assert.equal(resolved.authExpired, true);
+  const view = ui.effectiveAccount(signedAcc, resolved, context());
+  assert.notEqual(view.today_status, 'ok');
+  assert.notEqual(view.today_status, 'already');
+  const alerts = ui.accountAttention(view, context({ liveCheck: resolved }));
+  assert.equal(alerts.length, 1);
+  assert.equal(alerts[0].action, 'login');
+
+  // App switched back to auto while DB still holds skipped (no live check yet)
+  const skippedUnderAuto = ui.entryState('skipped', 'APP 已关闭', context({ key: 'app', appMode: 'auto' }));
+  assert.equal(skippedUnderAuto.label, '待执行');
+  assert.equal(skippedUnderAuto.tone, 'neutral');
+});

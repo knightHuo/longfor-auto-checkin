@@ -2,6 +2,7 @@
 
 import logging
 import re
+from datetime import datetime
 from html import escape
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -328,15 +329,24 @@ def api_account_status(account_id: int):
     account = db.get_account(account_id)
     if not account:
         raise HTTPException(404, "账号不存在")
+    entry_dates = {}
+    entry_checked_at = {}
     result = {"account_id": account_id, "mini": "unknown", "app": "unknown",
-              "profile": {}, "errors": []}
+              "profile": {}, "errors": [], "entry_dates": entry_dates,
+              "entry_checked_at": entry_checked_at, "auth_expired": False}
     for activity in longhu.ACTIVITIES:
+        key = activity["key"]
+        started_at = datetime.now(db.BUSINESS_TZ)
+        entry_dates[key] = started_at.date().isoformat()
+        entry_checked_at[key] = started_at.isoformat(timespec="milliseconds")
         try:
             state = longhu.sign_state(account, activity["activity_no"])
-            result[activity["key"]] = "signed" if state is True else "not_signed" if state is False else "unknown"
+            result[key] = "signed" if state is True else "not_signed" if state is False else "unknown"
             if state is not True and state is not False:
                 result["errors"].append(f"{activity['name']}签到状态暂时无法确认")
         except longhu.LonghuError as exc:
+            if isinstance(exc, longhu.LonghuAuthError):
+                result["auth_expired"] = True
             result["errors"].append(f"{activity['name']}：{longhu.redact(exc, account)}")
         except Exception:
             result["errors"].append(f"{activity['name']}签到状态查询异常，请稍后确认")
@@ -345,9 +355,20 @@ def api_account_status(account_id: int):
         allowed = ("growth_value", "level_name", "nickname", "balance", "expiring_lz")
         result["profile"] = {key: profile[key] for key in allowed if key in profile}
     except longhu.LonghuError as exc:
+        if isinstance(exc, longhu.LonghuAuthError):
+            result["auth_expired"] = True
         result["errors"].append(f"资料查询：{longhu.redact(exc, account)}")
     except Exception:
         result["errors"].append("资料查询异常，请稍后确认")
+    checked_at = datetime.now(db.BUSINESS_TZ)
+    result["today"] = checked_at.date().isoformat()
+    result["checked_at"] = checked_at.isoformat(timespec="milliseconds")
+    for activity in longhu.ACTIVITIES:
+        queried_on = entry_dates[activity["key"]]
+        if queried_on != result["today"]:
+            result["errors"].append(
+                f"状态核对跨过北京时间午夜，{activity['name']}查询开始于 {queried_on}，请重新核对今日状态"
+            )
     return result
 
 

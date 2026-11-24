@@ -5,6 +5,7 @@ import os
 import tempfile
 import unittest
 from contextlib import ExitStack
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -171,12 +172,23 @@ class CredentialFileTests(unittest.TestCase):
         profile = {"growth_value": 42, "level_name": "V2", "nickname": "测试",
                    "balance": 12, "token": account["token"], "dx_token": account["dx_token"],
                    "user_agent": account["user_agent"]}
+        checked_at = datetime(2026, 11, 7, 8, 46, 6, 123456, tzinfo=main.db.BUSINESS_TZ)
+        mini_at = checked_at - timedelta(seconds=2)
+        app_at = checked_at - timedelta(seconds=1)
+        clock_reads_at_query = []
         with ExitStack() as stack:
             stack.enter_context(patch.dict(os.environ, {"AUX_AUTH_FILE": str(self.path), "AUX_PUBLIC_ORIGIN": "",
                                                        "AUX_SCHEDULE_ENABLED": "0"}))
             stack.enter_context(patch.object(main.db, "init"))
+            clock = stack.enter_context(patch.object(main, "datetime"))
+            clock.now.side_effect = [mini_at, app_at, checked_at]
+
+            def read_calendar(account, activity_no):
+                clock_reads_at_query.append(clock.now.call_count)
+                return activity_no == main.longhu.ACTIVITY_NO
+
             lookup = stack.enter_context(patch.object(main.db, "get_account", return_value=account))
-            state = stack.enter_context(patch.object(main.longhu, "sign_state", side_effect=[True, False]))
+            state = stack.enter_context(patch.object(main.longhu, "sign_state", side_effect=read_calendar))
             fetch = stack.enter_context(patch.object(main.longhu, "fetch_profile", return_value=profile))
             writes = [stack.enter_context(patch.object(owner, name)) for owner, name in (
                 (main.longhu, "refresh_token"), (main.longhu, "checkin"),
@@ -194,6 +206,15 @@ class CredentialFileTests(unittest.TestCase):
             self.assertEqual((value["mini"], value["app"]), ("signed", "not_signed"))
             self.assertEqual(value["profile"], {"growth_value": 42, "level_name": "V2", "nickname": "测试", "balance": 12})
             self.assertEqual(value["errors"], [])
+            self.assertIs(value["auth_expired"], False)
+            self.assertEqual(value["today"], "2026-11-07")
+            self.assertEqual(value["checked_at"], "2026-11-07T08:46:06.123+08:00")
+            self.assertEqual(datetime.fromisoformat(value["checked_at"]).utcoffset(), timedelta(hours=8))
+            self.assertEqual(value["entry_dates"], {"mini": value["today"], "app": value["today"]})
+            self.assertEqual(value["entry_checked_at"], {"mini": "2026-11-07T08:46:04.123+08:00",
+                                                        "app": "2026-11-07T08:46:05.123+08:00"})
+            self.assertEqual(clock_reads_at_query, [1, 2])
+            self.assertEqual([call.args for call in clock.now.call_args_list], [(main.db.BUSINESS_TZ,)] * 3)
             self.assertEqual([call.args[1] for call in state.call_args_list],
                              [main.longhu.ACTIVITY_NO, main.longhu.APP_ACTIVITY_NO])
             fetch.assert_called_once_with(account)
@@ -201,6 +222,37 @@ class CredentialFileTests(unittest.TestCase):
                 write.assert_not_called()
             for secret in (account["token"], account["dx_token"], account["user_agent"]):
                 self.assertNotIn(secret, response.text)
+
+    def test_readonly_status_reports_which_entry_queries_started_before_midnight(self):
+        from app import main
+        account = {"id": 7}
+        checked_at = datetime(2026, 11, 8, 0, 0, 0, 7890, tzinfo=main.db.BUSINESS_TZ)
+        mini_at = checked_at - timedelta(milliseconds=30)
+        for app_at in (checked_at - timedelta(milliseconds=10), checked_at - timedelta(milliseconds=2)):
+            app_date = app_at.date().isoformat()
+            with self.subTest(app_date=app_date), \
+                    patch.dict(os.environ, {"AUX_AUTH_FILE": str(self.path), "AUX_PUBLIC_ORIGIN": "",
+                                            "AUX_SCHEDULE_ENABLED": "0"}), \
+                    patch.object(main.db, "init"), \
+                    patch.object(main.db, "get_account", return_value=account), \
+                    patch.object(main.longhu, "sign_state", side_effect=[True, False]), \
+                    patch.object(main.longhu, "fetch_profile", return_value={}), \
+                    patch.object(main, "datetime") as clock:
+                clock.now.side_effect = [mini_at, app_at, checked_at]
+                with TestClient(main.app, root_path="/console") as client:
+                    response = client.get("/console/api/accounts/7/status", auth=("operator", PASSWORD))
+            self.assertEqual(response.status_code, 200)
+            value = response.json()
+            self.assertEqual((value["mini"], value["app"]), ("signed", "not_signed"))
+            self.assertEqual(value["today"], "2026-11-08")
+            self.assertEqual(value["checked_at"], "2026-11-08T00:00:00.007+08:00")
+            self.assertEqual(value["entry_dates"], {"mini": "2026-11-07", "app": app_date})
+            self.assertEqual(value["entry_checked_at"], {"mini": "2026-11-07T23:59:59.977+08:00",
+                                                        "app": app_at.isoformat(timespec="milliseconds")})
+            self.assertIn("跨过北京时间午夜，小程序查询开始于 2026-11-07", value["errors"][0])
+            self.assertEqual(len(value["errors"]), 2 if app_date < value["today"] else 1)
+            if len(value["errors"]) == 2:
+                self.assertIn("APP查询开始于 2026-11-07", value["errors"][1])
 
     def test_readonly_status_preserves_unknown_and_redacts_business_errors(self):
         from app import main
@@ -215,8 +267,38 @@ class CredentialFileTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual((response.json()["mini"], response.json()["app"]), ("unknown", "unknown"))
         self.assertEqual(len(response.json()["errors"]), 3)
+        self.assertIs(response.json()["auth_expired"], False)
         self.assertNotIn(account["token"], response.text)
         self.assertNotIn(account["dx_token"], response.text)
+
+    def test_readonly_status_flags_auth_error_from_either_calendar_or_profile(self):
+        from app import main
+        account = {"id": 7}
+        error = main.longhu.LonghuAuthError("鉴权失败：登录已失效")
+        for source in ("mini", "app", "profile"):
+            with self.subTest(source=source), ExitStack() as stack:
+                stack.enter_context(patch.dict(os.environ, {"AUX_AUTH_FILE": str(self.path),
+                                                           "AUX_PUBLIC_ORIGIN": "", "AUX_SCHEDULE_ENABLED": "0"}))
+                stack.enter_context(patch.object(main.db, "init"))
+                stack.enter_context(patch.object(main.db, "get_account", return_value=account))
+                stack.enter_context(patch.object(main.longhu, "sign_state", side_effect=[
+                    error if source == "mini" else True, error if source == "app" else False,
+                ]))
+                stack.enter_context(patch.object(main.longhu, "fetch_profile", return_value={},
+                                                 side_effect=error if source == "profile" else None))
+                update = stack.enter_context(patch.object(main.db, "update_account"))
+                log = stack.enter_context(patch.object(main.db, "add_log"))
+                with TestClient(main.app, root_path="/console") as client:
+                    response = client.get("/console/api/accounts/7/status", auth=("operator", PASSWORD))
+                self.assertEqual(response.status_code, 200)
+                value = response.json()
+                self.assertIs(value["auth_expired"], True)
+                self.assertEqual(value["mini"], "unknown" if source == "mini" else "signed")
+                self.assertEqual(value["app"], "unknown" if source == "app" else "not_signed")
+                self.assertEqual(len(value["errors"]), 1)
+                self.assertIn("登录已失效", value["errors"][0])
+                update.assert_not_called()
+                log.assert_not_called()
 
     def test_readonly_status_missing_account_never_queries_upstream(self):
         from app import main

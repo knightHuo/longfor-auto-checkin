@@ -11,6 +11,7 @@
 import base64
 import hashlib
 import json
+import logging
 import math
 import re
 import time
@@ -18,6 +19,10 @@ from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 
 import requests
+
+from . import db
+
+logger = logging.getLogger(__name__)
 
 BASE = "https://gw2c-hw-open.longfor.com"
 
@@ -61,6 +66,14 @@ class LonghuAuthError(LonghuError):
     """明确的登录失效，不能当作临时网络错误自动重试。"""
 
 
+AUTH_FAILURE_PREFIX = "鉴权失败："
+
+
+def is_auth_failure(status: str, message: str) -> bool:
+    """识别 checkin 为兼容二元组返回值而转换的明确鉴权错误。"""
+    return status == "todo" and message.startswith(AUTH_FAILURE_PREFIX)
+
+
 def _check_auth(response: dict):
     message = str(response.get("message") or "")
     if str(response.get("code") or "") == "801001" or any(
@@ -90,7 +103,11 @@ def validate_dx_source(value: object = None) -> str:
 def redact(message: object, account: dict | None = None,
            extra_secrets: tuple = ()) -> str:
     """日志和通知只保留业务提示，不回显账号凭据。"""
-    text = str(message or "")
+    text = re.sub(
+        r"""(?i)(\bauthorization\b[ \t"']*[:=][ \t"']*)"""
+        r"""(?:[a-z][a-z0-9._+-]*[ \t]+)?[^\s,;"'&{}\[\]]+""",
+        r"\1[已隐藏]", str(message or ""),
+    )
     secrets = [
         (account or {}).get(key)
         for key in ("token", "dx_token", "api_key", "cookie")
@@ -100,10 +117,25 @@ def redact(message: object, account: dict | None = None,
         text = text.replace(secret, "[已隐藏]")
     # 处理上游回显的未知/更新后令牌，以及带凭据的 URL 参数。
     return re.sub(
-        r"(?i)(\b(?:[\w-]*token|api[-_]?key|cookie|authorization)\b"
-        r"[\s\"']*[:=][\s\"']*)([^\s,;\"'&}\]]+)",
+        r"(?i)(\b(?:[\w-]*token|api[-_]?key|cookie)\b"
+        r"[\s\"']*[:=][\s\"']*)([^\s,;\"'&{}\[\]]+)",
         r"\1[已隐藏]", text,
     )[:500]
+
+
+def _diagnostic_code(value: object, account: dict, extra_secrets: tuple = ()) -> str:
+    code = str(value or "")
+    credentials = (account.get("token"), account.get("dx_token"),
+                   account.get("api_key"), account.get("cookie"), *extra_secrets)
+    if re.fullmatch(r"[0-9]{3,7}|parse_error", code) and code not in map(str, credentials):
+        return code
+    return "invalid"
+
+
+def _account_error_code(value: object, account: dict, extra_secrets: tuple = ()) -> str:
+    code = _diagnostic_code(value, account, extra_secrets)
+    # 续期和资料诊断只输出已知码，避免把短数字验证码作为业务码回显。
+    return code if code in ("0000", "500", "5001", "parse_error") else "invalid"
 
 
 # --------------------------------------------------------------------------
@@ -200,7 +232,8 @@ def refresh_token(account: dict) -> tuple[bool, str]:
     _check_auth(res)
     key = _data_object(res).get("key")
     if not isinstance(key, str) or not key.strip():
-        return False, redact(res.get("message") or "token2key 未返回 key（token 可能已失效）", account)
+        code = _account_error_code(res.get("code"), account)
+        return False, f"token2key 未返回有效 key（code={code}），请检查登录凭据"
 
     wallet_headers = {
         "X-Gaia-Api-Key": API_KEY_WALLET,
@@ -221,7 +254,8 @@ def refresh_token(account: dict) -> tuple[bool, str]:
     if (res2.get("code") == "0000" and isinstance(data.get("token"), str)
             and data["token"] and not any(char.isspace() for char in data["token"])):
         return True, data["token"]
-    return False, redact(res2.get("message") or "key2token 未返回 token", account, (key,))
+    code = _account_error_code(res2.get("code"), account, (key,))
+    return False, f"key2token 未返回有效 token（code={code}），请检查登录凭据"
 
 
 def _task_headers(account: dict) -> dict:
@@ -250,6 +284,14 @@ def _task_headers(account: dict) -> dict:
     return headers
 
 
+def _entry_key(activity_no: str) -> str:
+    return "app" if activity_no == APP_ACTIVITY_NO else "mini"
+
+
+def _client_label(activity_no: str) -> str:
+    return "官方 App 内" if activity_no == APP_ACTIVITY_NO else "官方微信小程序内"
+
+
 def sign_state(account: dict, activity_no: str = ACTIVITY_NO) -> bool | None:
     """查询「今天是否已签到」。True=已签，False=未签，None=查不到。
 
@@ -257,6 +299,8 @@ def sign_state(account: dict, activity_no: str = ACTIVITY_NO) -> bool | None:
     clock 在「已签到」和「签到被拒」两种情况下都可能不返回奖励明细。
     """
     headers = _task_headers(account)  # 配置错误明确抛出，不当成一次网络失败。
+    entry = _entry_key(activity_no)
+    started = time.monotonic()
     try:
         res = _request(
             "POST",
@@ -267,13 +311,21 @@ def sign_state(account: dict, activity_no: str = ACTIVITY_NO) -> bool | None:
     except LonghuAuthError:
         raise
     except LonghuError:
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        logger.warning("日历查询失败 entry=%s elapsed_ms=%d", entry, elapsed_ms)
         return None
     _check_auth(res)
+    elapsed_ms = int((time.monotonic() - started) * 1000)
     if res.get("code") != "0000":
+        logger.warning(
+            "日历查询返回非成功码 entry=%s elapsed_ms=%d code=%s",
+            entry, elapsed_ms, _diagnostic_code(res.get("code"), account),
+        )
         return None
 
     data = res.get("data") or {}
     if not isinstance(data, dict):
+        logger.warning("日历响应 data 非对象 entry=%s elapsed_ms=%d", entry, elapsed_ms)
         return None
     # 用服务端时间判断“今天”，避免容器时区与龙湖不一致
     business_tz = timezone(timedelta(hours=8))
@@ -297,18 +349,23 @@ def sign_state(account: dict, activity_no: str = ACTIVITY_NO) -> bool | None:
             try:
                 status = int(item.get("sign_status"))
             except (TypeError, ValueError):
+                logger.warning("日历 sign_status 无法解析 entry=%s elapsed_ms=%d", entry, elapsed_ms)
                 return None
-            return {20: True, 10: False}.get(status)
+            mapped = {20: True, 10: False}.get(status)
+            if mapped is None:
+                logger.warning("日历 sign_status 未识别 entry=%s elapsed_ms=%d", entry, elapsed_ms)
+            return mapped
+    logger.warning("日历缺少当日记录 entry=%s elapsed_ms=%d", entry, elapsed_ms)
     return None
 
 
 CODE_HINT = {
     # 验证频率及设备是否被接受由上游决定，不能承诺人工验证一次后永久可用。
     "801810": "风控拒绝：请在官方客户端确认状态并完成必要验证",
-    "801811": "需要滑块验证：请在 App 内完成验证后，再检查签到状态",
+    "801811": "需要滑块验证：请在对应官方客户端完成验证后，再检查签到状态",
     "801812": "风控拒绝：请在官方客户端确认状态并完成必要验证",
-    "8040012": "需要人机验证：请在 App 内确认并完成验证；验证频率由服务端决定",
-    "8040016": "需要人机验证：请在 App 内确认并完成验证；验证频率由服务端决定",
+    "8040012": "需要人机验证：请在对应官方客户端确认并完成验证；验证频率由服务端决定",
+    "8040016": "需要人机验证：请在对应官方客户端确认并完成验证；验证频率由服务端决定",
 }
 
 # 风控拒绝转为人工处理，避免把需要验证的响应当作普通临时错误不断重试。
@@ -343,26 +400,47 @@ def checkin(account: dict, activity_no: str = ACTIVITY_NO,
     status: ok（签到成功）/ already（今日已签）/ retry（未提交，可重试）/ todo（待确认）/
             risk（风控拒绝）/ fail（其他失败）
     """
-    tag = f"{label}" if label else ""
+    try:
+        return _checkin(account, activity_no, label, on_submit)
+    except LonghuAuthError as exc:
+        detail = redact(exc, account).removeprefix(AUTH_FAILURE_PREFIX)
+        return "todo", f"{AUTH_FAILURE_PREFIX}{detail}"
+
+
+def _checkin(account: dict, activity_no: str, tag: str,
+             on_submit: Callable[[], None] | None) -> tuple[str, str]:
     try:
         validate_dx_source(account.get("dx_source"))
     except LonghuError as exc:
         return "todo", f"{tag}{exc}，未提交签到，请修正配置"
     # 先查状态：已签就不要再打签到接口，免得无谓地触发风控
-    try:
-        before = sign_state(account, activity_no)
-    except LonghuAuthError as exc:
-        return "todo", f"{tag}{exc}，未提交签到"
+    calendar_day = db.business_date()
+    before = sign_state(account, activity_no)
+    if db.business_date() != calendar_day:
+        return "retry", f"{tag}签到查询期间已跨过北京时间午夜，需重新查询当日日历后再提交"
     if before is True:
         return "already", f"{tag}今日已签到"
     if before is None:
         return "retry", f"{tag}暂时无法查询今日状态，尚未提交，将稍后重查；持续失败请检查登录"
 
     headers = _task_headers(account)
+    entry = _entry_key(activity_no)
+    client = _client_label(activity_no)
+
+    def confirm_day() -> bool | None:
+        if db.business_date() != calendar_day:
+            return None
+        state = sign_state(account, activity_no)
+        return state if db.business_date() == calendar_day else None
+
     # 先持久化提交意图，再发请求；写库失败必须阻止请求。
     # 若进程在上游执行后退出，重启仍会把该入口视为待确认而只读复核。
     if on_submit is not None:
         on_submit()
+    elif db.business_date() != calendar_day:
+        return "retry", f"{tag}签到准备期间已跨过北京时间午夜，需重新查询当日日历后再提交"
+
+    started = time.monotonic()
     try:
         res = _request(
             "POST",
@@ -370,47 +448,50 @@ def checkin(account: dict, activity_no: str = ACTIVITY_NO,
             headers,
             {"activity_no": activity_no},
         )
+    except LonghuAuthError:
+        raise
     except LonghuError as exc:
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        logger.warning("签到提交异常 entry=%s elapsed_ms=%d", entry, elapsed_ms)
         # 提交发生网络异常时，服务端可能已执行；禁止自动重发。
-        return "todo", f"{tag}签到请求结果未知：{redact(exc, account)}，请在 App 内确认"
+        return "todo", f"{tag}签到请求结果未知：{redact(exc, account)}，请在{client}确认"
 
-    code = redact(res.get("code") or "", account)
-    message = redact(res.get("message") or "", account)
+    elapsed_ms = int((time.monotonic() - started) * 1000)
+    code = str(res.get("code") or "")
+    diagnostic_code = _diagnostic_code(code, account)
+    _check_auth(res)
 
     if code == "0000":
         # 奖励弹窗不能替代日历复核；成长值和珑珠也不能混加成“积分”。
-        try:
-            after = sign_state(account, activity_no)
-        except LonghuAuthError:
-            after = None
+        after = confirm_day()
+        logger.info(
+            "签到提交响应 entry=%s elapsed_ms=%d code=%s calendar_after=%s",
+            entry, elapsed_ms, diagnostic_code, after,
+        )
         if after is True:
             return "ok", f"{tag}签到成功（已按日历确认）"
         if after is False:
             return "todo", f"{tag}签到接口已返回，但日历尚未确认；请稍后只读核对，未自动重发"
-        return "todo", f"{tag}签到已提交，但日历状态查询失败，请在 App 内确认"
-
-    try:
-        _check_auth(res)
-    except LonghuAuthError as exc:
-        return "todo", str(exc)
+        return "todo", f"{tag}签到已提交，但日历状态查询失败，请在{client}确认"
 
     # 兜底：接口报错但可能实际上已经签上（历史上出现过报错但状态已更新）
-    try:
-        confirmed = sign_state(account, activity_no)
-    except LonghuAuthError:
-        confirmed = None
+    confirmed = confirm_day()
+    logger.warning(
+        "签到提交返回非成功码 entry=%s elapsed_ms=%d code=%s calendar_after=%s",
+        entry, elapsed_ms, diagnostic_code, confirmed,
+    )
     if confirmed is True:
-        return "ok", f"{tag}签到成功（接口返回 {code}，已按日历确认）"
-    if code in ("", "parse_error"):
-        return "todo", f"{tag}签到返回内容无法确认，请在 App 内核实，未自动重试"
+        return "ok", f"{tag}签到成功（接口返回 {diagnostic_code}，已按日历确认）"
+    if diagnostic_code in ("invalid", "parse_error"):
+        return "todo", f"{tag}签到返回内容无法确认，请在{client}核实，未自动重试"
 
-    hint = CODE_HINT.get(code, "")
-    detail = f"{message or '未知错误'}（code={code or '无'}{'，' + hint if hint else ''}）"
+    hint = CODE_HINT.get(code, "请在官方客户端核对签到状态")
+    detail = f"{hint}（code={diagnostic_code}）"
     if code in RISK_CODES:
         # 仅显式启用实验求解器时，尝试取得验证凭证并追加一次提交。
-        if code in ("8040012", "8040016"):
+        if code in ("8040012", "8040016") and db.business_date() == calendar_day:
             token, why = _solve_captcha(account)
-            if token:
+            if token and db.business_date() == calendar_day:
                 device = (account.get("dx_token") or "").strip()
                 retry_headers = _task_headers(account)
                 retry_headers["X-LF-DXRisk-Captcha-Token"] = _captcha_header(token, device)
@@ -423,18 +504,20 @@ def checkin(account: dict, activity_no: str = ACTIVITY_NO,
                         retry_headers,
                         {"activity_no": activity_no},
                     )
-                except LonghuError as exc:
-                    return "todo", f"{tag}过滑块后签到结果未知：{redact(exc, account, (token,))}，请在 App 内确认"
-                code2 = redact(res2.get("code") or "", account, (token,))
-                try:
-                    after = sign_state(account, activity_no)
                 except LonghuAuthError:
-                    after = None
+                    raise
+                except LonghuError as exc:
+                    return "todo", f"{tag}过滑块后签到结果未知：{redact(exc, account, (token,))}，请在{client}确认"
+                _check_auth(res2)
+                code2 = _diagnostic_code(res2.get("code"), account, (token,))
+                after = confirm_day()
                 if after is True:
                     return "ok", f"{tag}签到成功（已过滑块，按日历确认）"
                 if after is None:
-                    return "todo", f"{tag}过滑块后签到已提交，但日历状态查询失败，请在 App 内确认"
-                detail = f"{detail}；过滑块后仍失败（code={code2 or '无'}）"
+                    return "todo", f"{tag}过滑块后签到已提交，但日历状态查询失败，请在{client}确认"
+                if code2 in ("invalid", "parse_error"):
+                    return "todo", f"{tag}过滑块后签到返回内容无法确认，请在{client}核实，未自动重试"
+                detail = f"{detail}；过滑块后仍失败（code={code2}）"
             elif why and why != "off":
                 detail = f"{detail}；滑块求解未完成：{redact(why, account)}"
         # 风控拒绝：当天重试无意义，标 risk 不进入失败重试排程
@@ -460,7 +543,8 @@ def fetch_profile(account: dict) -> dict:
     )
     _check_auth(res)
     if res.get("code") != "0000":
-        raise LonghuError(redact(res.get("message") or "用户信息查询失败", account))
+        code = _account_error_code(res.get("code"), account)
+        raise LonghuError(f"用户信息查询失败（code={code}），请稍后重查")
 
     data = _data_object(res)
     profile = {}
@@ -490,6 +574,7 @@ def fetch_profile(account: dict) -> dict:
             f"{BASE}/supera/member/api/bff/pages/v2_6_0/v2/user-lz-balance",
             balance_headers,
         )
+        _check_auth(res2)
         if res2.get("code") == "0000":
             bdata = res2.get("data") or {}
             if isinstance(bdata, dict):
@@ -504,6 +589,8 @@ def fetch_profile(account: dict) -> dict:
                     if math.isfinite(value):
                         profile[target] = value
                 balance_available = "balance" in profile
+    except LonghuAuthError:
+        raise
     except LonghuError:
         pass
     if not balance_available:

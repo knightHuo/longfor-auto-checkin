@@ -99,14 +99,14 @@ class SchedulerTests(unittest.TestCase):
 
     def test_retry_exhaustion_stops_today(self):
         self.settings.update(retry_date="2026-11-07", retry_at=self.now.isoformat(), retry_count="4")
-        subject._record_result(False)
+        self.assertEqual(subject._record_result(False), "exhausted")
         self.assertEqual(self.settings["last_run_date"], "2026-11-07")
         self.assertEqual(self.settings["retry_at"], "")
         self.assertEqual(subject._pick_next().date(), (self.now + timedelta(days=1)).date())
 
     def test_retry_does_not_cross_midnight(self):
         self.now = self.now.replace(hour=23, minute=55)
-        subject._record_result(False)
+        self.assertEqual(subject._record_result(False), "midnight")
         self.assertEqual(self.settings["last_run_date"], "2026-11-07")
         self.assertEqual(self.settings["retry_at"], "")
         self.assertEqual(self.settings["retry_count"], "0")
@@ -148,7 +148,9 @@ class SchedulerTests(unittest.TestCase):
     def test_app_only_failure_gets_retry(self):
         self.run_all.return_value = [{"checkin_status": "already", "extra_signs": [
             {"key": "app", "status": "fail"}]}]
-        subject._job()
+        with self.assertLogs(subject.logger, level="INFO") as logs:
+            subject._job()
+        self.assertIn("可重试 1 个，已排重试 1 个，需人工处理 0 个", "\n".join(logs.output))
         self.assertEqual(self.settings["retry_count"], "1")
         self.assertEqual(self.scheduler.jobs[subject.JOB_ID].next_run_time,
                          self.now + timedelta(minutes=10))
@@ -210,6 +212,59 @@ class SchedulerTests(unittest.TestCase):
         self.summary.side_effect = notify_after_commit
         with self.assertLogs(subject.logger, level="ERROR"):
             subject._job()
+        self.assertEqual(self.settings["retry_at"], "")
+        self.assertEqual(self.settings["last_run_date"], "2026-11-07")
+
+    def test_job_log_separates_retry_and_manual_attention_counts(self):
+        self.run_all.return_value = [
+            {"checkin_status": "risk", "extra_signs": [{"key": "app", "status": "risk"}]},
+        ]
+        with self.assertLogs(subject.logger, level="INFO") as logs:
+            subject._job()
+        joined = "\n".join(logs.output)
+        self.assertIn("可重试 0 个，已排重试 0 个", joined)
+        self.assertIn("需人工处理 1 个", joined)
+        self.assertEqual(self.settings["last_run_date"], "2026-11-07")
+        self.assertEqual(self.settings["retry_at"], "")
+
+    def test_exhausted_retry_logs_manual_attention_without_counting_account_twice(self):
+        self.settings.update(retry_date="2026-11-07", retry_at=self.now.isoformat(), retry_count="4")
+        self.run_all.return_value = [
+            {"checkin_status": "retry", "extra_signs": [{"key": "app", "status": "risk"}]},
+            {"checkin_status": "retry"},
+        ]
+        with self.assertLogs(subject.logger, level="INFO") as logs:
+            subject._job()
+        joined = "\n".join(logs.output)
+        self.assertIn("已重试 4 次仍失败", joined)
+        self.assertIn("可重试 0 个，已排重试 0 个，需人工处理 2 个", joined)
+        self.assertNotIn("待重试", joined)
+
+    def test_retry_log_distinguishes_durable_decision_from_failed_job_creation(self):
+        self.run_all.return_value = [{"checkin_status": "retry"}]
+        with patch.object(self.scheduler, "add_job", side_effect=RuntimeError("synthetic failure")), \
+                self.assertLogs(subject.logger, level="INFO") as logs:
+            subject._job()
+        joined = "\n".join(logs.output)
+        self.assertIn("重排签到任务失败，等待巡场恢复", joined)
+        self.assertIn("可重试 1 个，已排重试 0 个，需人工处理 0 个", joined)
+        self.assertTrue(self.settings["retry_at"])
+        self.assertNotIn(subject.JOB_ID, self.scheduler.jobs)
+
+    def test_job_finishing_after_midnight_logs_settlement_without_queuing_retry(self):
+        self.now = self.now.replace(hour=23, minute=59)
+
+        def finish_after_midnight():
+            self.now = self.now.replace(hour=0, minute=0) + timedelta(days=1)
+            return [{"checkin_status": "retry"}]
+
+        self.run_all.side_effect = finish_after_midnight
+        with self.assertLogs(subject.logger, level="INFO") as logs:
+            subject._job()
+        joined = "\n".join(logs.output)
+        self.assertIn("任务跨午夜完成", joined)
+        self.assertIn("可重试 0 个，已排重试 0 个，需人工处理 1 个", joined)
+        self.assertNotIn("待重试", joined)
         self.assertEqual(self.settings["retry_at"], "")
         self.assertEqual(self.settings["last_run_date"], "2026-11-07")
 

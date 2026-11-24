@@ -3,7 +3,7 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from app import longhu
+from app import longhu, scheduler
 
 
 ACCOUNT = {"token": "fake-review-token", "dx_token": "fake-review-device", "dx_source": "3"}
@@ -51,6 +51,15 @@ class ReadFailureTests(unittest.TestCase):
         self.assertEqual(status, "todo")
         self.assertEqual(request.call_count, 1)
 
+    def test_auth_failure_after_submission_uses_authentication_result(self):
+        error = longhu.LonghuAuthError("登录已失效，请重新导入")
+        with patch.object(longhu, "sign_state", side_effect=[False, error]), \
+                patch.object(longhu, "_request", return_value={"code": "0000"}) as request:
+            status, message = longhu.checkin(ACCOUNT)
+        self.assertTrue(longhu.is_auth_failure(status, message))
+        self.assertTrue(message.startswith("鉴权失败："))
+        request.assert_called_once()
+
 
 class PartialProfileTests(unittest.TestCase):
     def test_malformed_profile_does_not_raise_an_exception_with_response_content(self):
@@ -97,6 +106,42 @@ class PartialProfileTests(unittest.TestCase):
             with self.subTest(raw=raw):
                 self.assertNotIn("balance", self.profile({"code": "0000", "data": {"balance": raw}}))
 
+    def test_definite_balance_auth_failure_is_exposed_to_status_queries(self):
+        for response in (longhu.LonghuAuthError("登录已失效"), {"code": "801001"}):
+            with self.subTest(response=response), self.assertRaises(longhu.LonghuAuthError):
+                self.profile(response)
+
+
+class UpstreamMessageTests(unittest.TestCase):
+    def test_refresh_returns_safe_hints_for_both_steps(self):
+        echo = "Bearer fake-unknown-bearer 0rYTQ6JpNw2Z"
+        key_exchange = {"code": "0000", "data": {"key": "fake-key-exchange"}}
+        for responses, action, code in (
+            ([{"code": "5001", "message": echo}], "token2key", "5001"),
+            ([key_exchange, {"code": "0rYTQ6JpNw2Z", "message": echo}], "key2token", "invalid"),
+            ([key_exchange, {"code": "123456", "message": "验证码 123456"}], "key2token", "invalid"),
+            ([{"data": {"key": "5001"}}, {"code": "5001"}], "key2token", "invalid"),
+        ):
+            with self.subTest(action=action), patch.object(longhu, "_request", side_effect=responses):
+                ok, message = longhu.refresh_token(ACCOUNT)
+            self.assertFalse(ok)
+            self.assertIn(action, message)
+            self.assertIn(f"code={code}", message)
+            self.assertNotIn("Bearer", message)
+            self.assertNotIn("0rYTQ6JpNw2Z", message)
+            self.assertNotIn("fake-key-exchange", message)
+            self.assertNotIn("123456", message)
+
+    def test_profile_failure_uses_safe_hint_and_diagnostic_code(self):
+        for code, diagnostic in (("5001", "5001"), ("0rYTQ6JpNw2Z", "invalid"), ("123456", "invalid")):
+            response = {"code": code, "message": "Bearer fake-unknown-bearer 0rYTQ6JpNw2Z"}
+            with self.subTest(code=code), patch.object(longhu, "_request", return_value=response):
+                with self.assertRaisesRegex(longhu.LonghuError, f"^用户信息查询失败（code={diagnostic}）") as raised:
+                    longhu.fetch_profile(ACCOUNT)
+            self.assertNotIn("Bearer", str(raised.exception))
+            self.assertNotIn("0rYTQ6JpNw2Z", str(raised.exception))
+            self.assertNotIn("123456", str(raised.exception))
+
 
 class TransportTests(unittest.TestCase):
     def test_credential_headers_are_not_forwarded_after_redirects(self):
@@ -118,6 +163,99 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(status, "todo")
         self.assertEqual(session.post.call_count, 1)
         self.assertNotIn(ACCOUNT["token"], message)
+
+    def test_calendar_and_clock_diagnostics_are_logged_and_redacted(self):
+        echo = "synthetic upstream text Authorization: Bearer fake-unknown-bearer"
+        with patch.object(longhu, "_request",
+                          return_value={"code": "5001", "message": f"{echo} {ACCOUNT['token']}"}), \
+                self.assertLogs(longhu.logger, "WARNING") as logs:
+            self.assertIsNone(longhu.sign_state(ACCOUNT, longhu.APP_ACTIVITY_NO))
+        joined = "\n".join(logs.output)
+        self.assertIn("entry=app", joined)
+        self.assertIn("code=5001", joined)
+        self.assertIn("elapsed_ms=", joined)
+        self.assertNotIn(ACCOUNT["token"], joined)
+        self.assertNotIn("fake-unknown-bearer", joined)
+        self.assertNotIn("synthetic upstream text", joined)
+        self.assertNotIn("message=", joined)
+
+        with patch.object(longhu, "sign_state", side_effect=[False, False]), \
+                patch.object(longhu, "_solve_captcha", return_value=(None, "off")), \
+                patch.object(longhu, "_request",
+                             return_value={"code": "8040012", "message": f"{echo} {ACCOUNT['dx_token']}"}), \
+                self.assertLogs(longhu.logger, "WARNING") as logs:
+            status, message = longhu.checkin(ACCOUNT, longhu.ACTIVITY_NO)
+        joined = "\n".join(logs.output)
+        self.assertEqual(status, "risk")
+        self.assertIn("entry=mini", joined)
+        self.assertIn("code=8040012", joined)
+        self.assertIn("calendar_after=False", joined)
+        self.assertNotIn(ACCOUNT["dx_token"], joined + message)
+        self.assertNotIn("fake-unknown-bearer", joined + message)
+        self.assertNotIn("synthetic upstream text", joined + message)
+
+    def test_redact_removes_entire_authorization_credentials(self):
+        for header, secret in (
+            ("Authorization: Bearer {}", "fake-bearer-credential"),
+            ("authorization: Basic {}\r\n", "ZmFrZTpzZWNyZXQ="),
+            ('"Authorization": "bEaReR {}"', "fake-json-credential"),
+            ("Proxy-Authorization: Token {}", "fake-proxy-credential"),
+        ):
+            with self.subTest(header=header):
+                sanitized = longhu.redact(header.format(secret))
+                self.assertIn("[已隐藏]", sanitized)
+                self.assertNotIn(secret, sanitized)
+                self.assertEqual(sanitized, longhu.redact(sanitized))
+
+    def test_diagnostics_reject_unsafe_business_codes(self):
+        for code in ("Authorization: Basic ZmFrZTpzZWNyZXQ=", "line\nbreak", "代码", "x" * 25,
+                     "0rYTQ6JpNw2Z", ACCOUNT["token"]):
+            with self.subTest(code=code):
+                payload = {"code": code}
+                with patch.object(longhu, "_request", return_value=payload), \
+                        self.assertLogs(longhu.logger, "WARNING") as logs:
+                    self.assertIsNone(longhu.sign_state(ACCOUNT))
+                joined = "\n".join(logs.output)
+                self.assertIn("code=invalid", joined)
+                self.assertNotIn(code, joined)
+
+                with patch.object(longhu, "_request", return_value=payload), \
+                        patch.object(longhu, "sign_state", return_value=False), \
+                        self.assertLogs(longhu.logger, "WARNING") as logs:
+                    status, message = longhu.checkin(ACCOUNT)
+                self.assertEqual(status, "todo")
+                self.assertFalse(scheduler._needs_retry({"checkin_status": status}))
+                joined = "\n".join(logs.output)
+                self.assertIn("code=invalid", joined)
+                self.assertNotIn(code, joined + message)
+
+    def test_unexplained_submit_response_uses_only_calendar_confirmation(self):
+        for code in (None, "", "parse_error", "unknown-c0de"):
+            for confirmed in (False, None, True):
+                with self.subTest(code=code, confirmed=confirmed), \
+                        patch.object(longhu, "_request", return_value={"code": code}) as request, \
+                        patch.object(longhu, "sign_state", side_effect=[False, confirmed]):
+                    status, _ = longhu.checkin(ACCOUNT)
+                self.assertEqual(status, "ok" if confirmed is True else "todo")
+                self.assertFalse(scheduler._needs_retry({"checkin_status": "ok", "extra_signs": [
+                    {"key": "app", "status": status},
+                ]}))
+                request.assert_called_once()
+
+    def test_request_failure_diagnostics_do_not_echo_exception_text(self):
+        secret = "fake-basic-credential"
+        error = longhu.LonghuError(f"synthetic upstream text Authorization: Basic {secret}")
+        with patch.object(longhu, "_request", side_effect=error), \
+                self.assertLogs(longhu.logger, "WARNING") as logs:
+            self.assertIsNone(longhu.sign_state(ACCOUNT))
+            with patch.object(longhu, "sign_state", return_value=False):
+                status, message = longhu.checkin(ACCOUNT)
+        joined = "\n".join(logs.output)
+        self.assertIn("日历查询失败", joined)
+        self.assertIn("签到提交异常", joined)
+        self.assertNotIn("synthetic upstream text", joined)
+        self.assertNotIn(secret, joined + message)
+        self.assertEqual(status, "todo")
 
 
 if __name__ == "__main__":
